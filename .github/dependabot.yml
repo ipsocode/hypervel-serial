@@ -1,0 +1,20 @@
+# Imported from ipsocode/hypervel-packages github/dependabot.yml. Edit it there.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: widen
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: hypervel/*
+      - dependency-name: phpunit/phpunit

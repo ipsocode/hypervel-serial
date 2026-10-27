@@ -1,0 +1,31 @@
+# Testbench configuration for ipsocode/hypervel-serial.
+#
+# The suite needs no host application of its own: each test configures the
+# connections it uses in defineEnvironment() or through #[WithConfig], so there
+# is no workbench/.
+
+providers:
+  - Ipsocode\Serial\SerialServiceProvider
+
+env:
+  # Applied by the Testbench CLI (`composer test`, `testbench serve`) only, not by the
+  # TestCase path, so nothing the suite asserts on may depend on it.
+  APP_NAME: "Hypervel Serial Testbench"
+  APP_ENV: testing
+
+workbench:
+  install: false
+  auth: false
+  health: false
+  discovers:
+    config: false
+    factories: false
+    web: false
+    api: false
+    commands: false
+    components: false
+    views: false
+
+purge:
+  files:
+    - .env

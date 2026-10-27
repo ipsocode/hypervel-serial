@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+    bootstrap="vendor/autoload.php"
+    cacheDirectory="tests/.cache/phpunit"
+    colors="true"
+    failOnWarning="true"
+    failOnRisky="true"
+>
+    <extensions>
+        <bootstrap class="Hypervel\Testing\PHPUnit\AfterEachTestExtension"/>
+    </extensions>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory suffix=".php">./src</directory>
+        </include>
+    </source>
+    <php>
+        <env name="LOG_CHANNEL" value="null"/>
+        <!-- Pin the terminal size so no console test shells out to `stty` from inside
+             its coroutine, where a lost SIGCHLD can hang a worker for good. The values
+             match hypervel/components' own phpunit.xml.dist. -->
+        <env name="COLUMNS" value="80" force="true"/>
+        <env name="LINES" value="24" force="true"/>
+    </php>
+</phpunit>

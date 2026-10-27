@@ -1,0 +1,114 @@
+# Imported from ipsocode/hypervel-packages github/workflows/branches.yml. Edit it there.
+name: branches
+
+on:
+  issues:
+    types: [opened, edited, milestoned]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: branches-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  link:
+    name: Create the umbrella's feature branch
+    if: github.event.issue.state == 'open' && !github.event.issue.pull_request && github.event.issue.milestone && startsWith(github.event.issue.title, '[Tracking]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Create the linked branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          issue=$(gh api "repos/${REPO}/issues/${NUMBER}")
+
+          if jq -e '(.body // "") | test("Base branch: `")' <<< "${issue}" > /dev/null; then
+            echo "#${NUMBER} already names its base branch; nothing to do."
+            exit 0
+          fi
+
+          for prefix in feature bug-fixes; do
+            existing=$(gh api "repos/${REPO}/git/matching-refs/heads/${prefix}/${NUMBER}-" --jq '.[0].ref // empty')
+            if [ -n "${existing}" ]; then
+              echo "#${NUMBER} already has ${existing#refs/heads/}."
+              echo "branch=${existing#refs/heads/}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          done
+
+          kind=$(jq -r '
+            [.labels[].name]
+            | map(select(IN("bug", "coroutine-safety", "security", "performance", "conformance", "enhancement", "documentation", "breaking-change")))
+            | if length > 0 and (any(IN("enhancement", "breaking-change")) | not) then "bug-fixes" else "feature" end
+          ' <<< "${issue}")
+
+          slug=$(jq -r '
+            .title
+            | sub("^\\s*\\[tracking\\]\\s*"; ""; "i")
+            | ascii_downcase
+            | gsub("[^a-z0-9]+"; "-")
+            | gsub("^-+|-+$"; "")
+          ' <<< "${issue}")
+          if [ "${#slug}" -gt 40 ]; then
+            slug="${slug:0:41}"
+            slug="${slug%-*}"
+            slug="${slug:0:40}"
+          fi
+          slug="${slug%-}"
+          slug="${slug:-umbrella}"
+
+          branch="${kind}/${NUMBER}-${slug}"
+          if ! gh issue develop "${NUMBER}" --repo "${REPO}" --base main --name "${branch}"; then
+            if ! gh api "repos/${REPO}/git/matching-refs/heads/${branch}" --jq '.[].ref' | grep -qxF "refs/heads/${branch}"; then
+              echo "gh issue develop failed and ${branch} does not exist."
+              exit 1
+            fi
+          fi
+          echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
+          echo "Created ${branch}, linked to #${NUMBER}."
+          echo "Created \`${branch}\`, linked to #${NUMBER}." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Write the umbrella's body
+        if: steps.branch.outputs.branch != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          BRANCH: ${{ steps.branch.outputs.branch }}
+        run: |
+          set -euo pipefail
+
+          line="**Base branch: \`${BRANCH}\`.** Branch from \`${BRANCH}\` and open the pull request against it, not the default branch. Close this issue by hand when the pull request merges there, since closing keywords act only on the default branch."
+          footer="> **How this issue works.** The routines action this umbrella top to bottom. Each pull request batches the next unchecked items in order, skipping any that wait on an open issue or are blocked, at most 10 changed files and one coherent change, on a new branch \`routine/group-${NUMBER}-<first item#>-<slug>\` cut from this issue's feature branch (the \"Base branch\" line above), and is opened ready for review against it. Its body says Refs this issue and Closes #N for each item it completes. Closing keywords act only on the default branch, so whoever merges a part closes its issues by hand, with a comment naming the pull request, and ticks their boxes here. Don't tick boxes when a pull request opens."
+
+          issue=$(gh api "repos/${REPO}/issues/${NUMBER}")
+          body=$(jq -r '(.body // "") | gsub("\r"; "")' <<< "${issue}")
+
+          new=$(jq -rn --arg body "${body}" --arg line "${line}" --arg footer "${footer}" '
+            ($body | sub("^\\s+"; "") | sub("\\s+$"; "")) as $old
+            | $old
+            | if test("Base branch: `") then . else ([$line, .] | map(select(. != "")) | join("\n\n")) end
+            | if test("(?m)^##\\s+Parts\\s*$") then .
+              elif test("(?m)^> \\*\\*How this issue works") then sub("(?m)^> \\*\\*How this issue works"; "## Parts\n\n> **How this issue works")
+              else . + "\n\n## Parts" end
+            | if test("How this issue works") then . else . + "\n\n" + $footer end
+            | if . == $old then empty else . end
+          ')
+
+          if [ -z "${new}" ]; then
+            echo "#${NUMBER}'s body already has its base-branch line, parts and footer."
+            exit 0
+          fi
+
+          gh api -X PATCH "repos/${REPO}/issues/${NUMBER}" -f body="${new}" > /dev/null
+          echo "Wrote #${NUMBER}'s base-branch line, parts and footer."
+          echo "Wrote #${NUMBER}'s base-branch line, parts and footer." >> "${GITHUB_STEP_SUMMARY}"

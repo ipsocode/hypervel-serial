@@ -1,0 +1,131 @@
+# Imported from ipsocode/hypervel-packages github/workflows/tests.yml. Edit it there.
+name: tests
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  RUN_BLOCKING_TESTS: 'true'
+  OTEL_SDK_DISABLED: 'true'
+  COMPOSER_CACHE_DIR: /tmp/composer-cache
+  COMPOSER_MEMORY_LIMIT: '-1'
+  COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+
+jobs:
+  initial:
+    name: initial
+    uses: ./.github/workflows/initial.yml
+
+  php84:
+    name: PHP 8.4
+    needs: initial
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: tests-${{ github.event.pull_request.number || github.ref }}-8.4
+      cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+    container:
+      image: ghcr.io/ipsocode/hypervel/ci-alpine:8.4-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache Composer downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/composer-cache
+          key: composer-8.4-${{ hashFiles('composer.json') }}
+          restore-keys: composer-8.4-
+
+      - name: Install dependencies
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          composer update --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Cache tests/.cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tests/.cache
+          key: tests-cache-8.4-${{ hashFiles('composer.json', 'phpstan.neon', 'phpunit.xml', '.php-cs-fixer.dist.php') }}-${{ github.sha }}
+          restore-keys: tests-cache-8.4-${{ hashFiles('composer.json', 'phpstan.neon', 'phpunit.xml', '.php-cs-fixer.dist.php') }}-
+
+      - name: Check code style
+        run: vendor/bin/php-cs-fixer fix --dry-run --diff
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --memory-limit 1G -c phpstan.neon --no-progress
+
+      - name: Assert a coverage driver is loaded
+        run: php -m | grep -qx pcov
+
+      - name: Run the suite under the coverage gate
+        id: gate
+        env:
+          MIN_COVERAGE: '100'
+        run: |
+          vendor/bin/testbench package:test --parallel \
+            --coverage --min="${MIN_COVERAGE}" --coverage-clover tests/coverage/clover.xml
+
+      - name: Upload the coverage report
+        if: ${{ always() && (github.event_name != 'pull_request' || steps.gate.outcome == 'failure') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clover-php8.4
+          path: tests/coverage/clover.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  php85:
+    name: PHP 8.5
+    needs: php84
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+
+    concurrency:
+      group: tests-${{ github.event.pull_request.number || github.ref }}-8.5
+      cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+    container:
+      image: ghcr.io/ipsocode/hypervel/ci-alpine:8.5-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache Composer downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/composer-cache
+          key: composer-8.5-${{ hashFiles('composer.json') }}
+          restore-keys: composer-8.5-
+
+      - name: Install dependencies
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          composer update --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Cache tests/.cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tests/.cache
+          key: tests-cache-8.5-${{ hashFiles('composer.json', 'phpstan.neon', 'phpunit.xml', '.php-cs-fixer.dist.php') }}-${{ github.sha }}
+          restore-keys: tests-cache-8.5-${{ hashFiles('composer.json', 'phpstan.neon', 'phpunit.xml', '.php-cs-fixer.dist.php') }}-
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --memory-limit 1G -c phpstan.neon --no-progress
+
+      - name: Run the suite
+        run: vendor/bin/testbench package:test --parallel

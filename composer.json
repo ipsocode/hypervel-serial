@@ -1,0 +1,98 @@
+{
+    "name": "ipsocode/hypervel-serial",
+    "description": "Serial port connections for Hypervel: named connections over a tty, framed protocols with configurable encodings and checksums, coroutine-safe transactions with retries, and a simulator for testing without the hardware",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "hypervel",
+        "serial",
+        "serial-port",
+        "uart",
+        "tty",
+        "crc",
+        "checksum",
+        "coroutine",
+        "swoole"
+    ],
+    "homepage": "https://github.com/ipsocode/hypervel-serial",
+    "authors": [
+        {
+            "name": "Ipsocode",
+            "homepage": "https://github.com/ipsocode"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/ipsocode/hypervel-serial/issues",
+        "source": "https://github.com/ipsocode/hypervel-serial",
+        "security": "https://github.com/ipsocode/hypervel-serial/security/policy"
+    },
+    "require": {
+        "hypervel/components": "0.4.x-dev"
+    },
+    "require-dev": {
+        "brianium/paratest": "^7.27.2",
+        "fakerphp/faker": "^1.24",
+        "friendsofphp/php-cs-fixer": "^3.57.2",
+        "hypervel/testbench": "^0.4",
+        "mockery/mockery": "^1.6",
+        "phpstan/phpstan": "^2.2.15",
+        "phpunit/phpunit": "~13.4.3"
+    },
+    "suggest": {
+        "ext-dio": "Required by the dio transport, which opens the device and sets its line settings (baud, data bits, stop bits, parity) from PHP."
+    },
+    "autoload": {
+        "psr-4": {
+            "Ipsocode\\Serial\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Ipsocode\\Serial\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "hypervel": {
+            "providers": [
+                "Ipsocode\\Serial\\SerialServiceProvider"
+            ],
+            "aliases": {
+                "Serial": "Ipsocode\\Serial\\Facades\\Serial"
+            }
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true,
+            "tbachert/spi": false
+        },
+        "platform": {
+            "ext-swoole": "6.3.0RC1"
+        }
+    },
+    "scripts": {
+        "lint": "@php vendor/bin/php-cs-fixer fix --diff --dry-run",
+        "lint:fix": "@php vendor/bin/php-cs-fixer fix",
+        "analyse": "@php vendor/bin/phpstan analyse --memory-limit 1G -c phpstan.neon",
+        "conventions": "@php .github/scripts/conventions.php",
+        "test": "@php vendor/bin/testbench package:test",
+        "test:phpunit": "@php vendor/bin/phpunit",
+        "test:parallel": "@php vendor/bin/testbench package:test --parallel",
+        "test:coverage": "@php vendor/bin/testbench package:test --parallel --coverage --min=100 --coverage-clover tests/coverage/clover.xml",
+        "test:purge": "@php vendor/bin/testbench package:purge-skeleton"
+    },
+    "scripts-descriptions": {
+        "analyse": "Run PHPStan over src/ with this package's phpstan.neon: the settings and extensions hypervel/components uses, at a stricter level.",
+        "conventions": "Run the conventions check with this package's settings, .github/conventions.php. Plain PHP: it needs no install.",
+        "lint": "Report the coding-standard changes php-cs-fixer would make, without writing them.",
+        "lint:fix": "Apply the coding standard. Risky rules are enabled (see .php-cs-fixer.dist.php) — run `composer test` afterwards, not just before committing.",
+        "test": "Run the package suite through the Testbench CLI.",
+        "test:phpunit": "Run the package suite through PHPUnit directly, bypassing the Testbench CLI.",
+        "test:parallel": "Run the package suite through ParaTest.",
+        "test:coverage": "Run the package suite through ParaTest with PCOV coverage, failing under 100%. Needs the PCOV extension, which the CI image has.",
+        "test:purge": "Clear cached config, routes, views and runtime SQLite files from the Testbench skeleton."
+    }
+}
