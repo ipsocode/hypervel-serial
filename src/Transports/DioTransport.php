@@ -144,8 +144,7 @@ class DioTransport implements Transport
      */
     public function flush(): void
     {
-        while ($this->read() !== '') {
-        }
+        while ($this->read() !== '');
     }
 
     /**
