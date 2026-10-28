@@ -68,6 +68,8 @@ Under Swoole's file hook, which Hypervel turns on, a read of a terminal waits un
 
 The `dio` transport opens the device through the [dio](https://pecl.php.net/package/dio) extension, which sets the line settings itself from `baud`, `data_bits`, `stop_bits`, `parity` (`none`, `odd` or `even`) and `flow_control` (RTS/CTS), in raw mode. The extension is not part of PHP, so install it before you choose this transport.
 
+The extension accepts only the standard baud rates, 50 to 460800 on Linux (such as 9600, 19200, 38400, 57600, 115200, 230400 and 460800). Any other rate, such as 250000, 921600 or 1000000, makes every transaction throw a `ValueError`, which is a configuration error and is not retried. Use the `stream` transport for a rate the extension does not accept.
+
 <a name="the-memory-transport"></a>
 ### The memory transport
 

@@ -107,6 +107,29 @@ class ConnectionTest extends TestCase
         $this->assertSame([0, 0], array_map($this->sequenceOf(...), $transport->written()));
     }
 
+    public function testTransactSkipsALateReplyToAnEarlierRequestAndReturnsItsOwn(): void
+    {
+        $transport = new FakeTransport([
+            fn (string $written): string => $this->reply(7, 'late') . $this->reply($this->sequenceOf($written), 'own'),
+        ]);
+
+        $result = $this->connection($transport)->transact(new Request(6), retries: 0);
+
+        $this->assertSame('own', $result->data());
+        $this->assertCount(1, $transport->written());
+    }
+
+    public function testTransactTimesOutWhenOnlyLateRepliesArrive(): void
+    {
+        Sleep::fake(syncWithCarbon: true);
+
+        $transport = new FakeTransport([$this->reply(7, 'late')]);
+
+        $this->expectException(TimeoutException::class);
+
+        $this->connection($transport)->transact(new Request(6), retries: 0);
+    }
+
     public function testTransactTriesAgainWhileTheReplyIsNotASuccess(): void
     {
         Sleep::fake();

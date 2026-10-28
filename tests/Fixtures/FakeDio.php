@@ -4,12 +4,21 @@ declare(strict_types=1);
 
 namespace Ipsocode\Serial\Tests\Fixtures;
 
+use ValueError;
+
 /**
  * The device behind the emulated ext-dio functions in dio.php, which return what the
- * extension's own do: dio_read() null when a read yields nothing, dio_write() -1 when it fails.
+ * extension's own do: dio_read() null when a read yields nothing, dio_write() -1, with a warning, when it fails, and dio_tcsetattr() a ValueError for a baud rate it does not accept.
  */
 class FakeDio
 {
+    /**
+     * The baud rates ext-dio accepts on Linux.
+     *
+     * @var array<int, int>
+     */
+    public const BAUD_RATES = [50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800];
+
     public static bool $openFails = false;
 
     public static ?string $device = null;
@@ -64,6 +73,10 @@ class FakeDio
      */
     public static function tcsetattr(mixed $handle, array $settings): bool
     {
+        if (isset($settings['baud']) && ! in_array($settings['baud'], static::BAUD_RATES, true)) {
+            throw new ValueError("dio_tcsetattr(): Argument #1 (\$fd) invalid baud rate {$settings['baud']}");
+        }
+
         static::$settings = $settings;
 
         return true;
@@ -90,6 +103,10 @@ class FakeDio
     public static function write(mixed $handle, string $bytes): int
     {
         $result = array_shift(static::$writeResults) ?? strlen($bytes);
+
+        if ($result < 0) {
+            trigger_error('dio_write(): cannot write data to the file descriptor', E_USER_WARNING);
+        }
 
         if ($result > 0) {
             static::$written .= substr($bytes, 0, $result);

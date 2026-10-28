@@ -69,7 +69,7 @@ A `length` field gives the payload's length in bytes. The frame's payload must m
 <a name="turning-replies-into-results"></a>
 ### Turning replies into results
 
-`FramedProtocol::validate` returns an `Ipsocode\Serial\Response`, which is always a success and carries the payload as its data. A device that reports a status in its replies deserves a result of its own: override `validate`, and return any class that implements `Ipsocode\Serial\Contracts\Result`. A backed enum of the device's status codes works well for statuses without data:
+`FramedProtocol::validate` returns an `Ipsocode\Serial\Response`, which is always a success and carries the payload as its data. The default `validate` accepts every frame, so it cannot tell a late reply to an earlier request from this request's own reply: a protocol for a device that can reply late must check the sequence itself. A device that reports a status in its replies deserves a result of its own: override `validate`, and return any class that implements `Ipsocode\Serial\Contracts\Result`. A backed enum of the device's status codes works well for statuses without data:
 
 ```php
 use Ipsocode\Serial\Contracts\Result;
