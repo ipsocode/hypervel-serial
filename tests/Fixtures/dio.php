@@ -43,6 +43,16 @@ function dio_read(mixed $fd, int $n = 1024): ?string
 
 /**
  * @param resource $fd
+ *
+ * @return array{nlink: int}
+ */
+function dio_stat(mixed $fd): array
+{
+    return FakeDio::stat($fd);
+}
+
+/**
+ * @param resource $fd
  */
 function dio_write(mixed $fd, string $data, int $len = 0): int
 {

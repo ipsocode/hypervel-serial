@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Ipsocode\Serial\Tests\Feature\Transports;
 
+use Closure;
 use Hypervel\Support\Sleep;
 use Hypervel\Testing\UnitTestCase;
 use Ipsocode\Serial\Exceptions\TransportException;
@@ -11,6 +12,7 @@ use Ipsocode\Serial\Parity;
 use Ipsocode\Serial\Tests\Fixtures\FakeDio;
 use Ipsocode\Serial\Transports\DioTransport;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ValueError;
 
 require_once __DIR__ . '/../../Fixtures/dio.php';
 
@@ -118,6 +120,50 @@ class DioTransportTest extends UnitTestCase
         $transport->write('hello');
     }
 
+    public function testAWriteToAnUnpluggedDeviceFailsAtOnce(): void
+    {
+        $transport = $this->transport();
+        $transport->open();
+        FakeDio::$unplugged = true;
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('Unable to write to the serial device [/dev/serial0]: dio_write(): cannot write data to the file descriptor 5, Input/output error');
+
+        $transport->write('hello');
+    }
+
+    public function testAWriteToAnUnpluggedDeviceFailsAtOnceUnderTheApplicationsErrorHandler(): void
+    {
+        // The framework's handler returns without setting error_get_last().
+        set_error_handler(static function (int $level, string $message): void {
+        });
+
+        try {
+            $transport = $this->transport();
+            $transport->open();
+            FakeDio::$unplugged = true;
+
+            $this->expectException(TransportException::class);
+            $this->expectExceptionMessage('Input/output error');
+
+            $transport->write('hello');
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    public function testAReadFromAnUnpluggedDeviceFailsAtOnce(): void
+    {
+        $transport = $this->transport();
+        $transport->open();
+        FakeDio::$unplugged = true;
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('The serial device [/dev/serial0] is no longer available.');
+
+        $transport->read();
+    }
+
     public function testFlushDiscardsTheBytesThatHaveArrived(): void
     {
         $transport = $this->transport();
@@ -142,12 +188,36 @@ class DioTransportTest extends UnitTestCase
         $this->assertFalse($transport->isOpen());
     }
 
-    public function testUsingADeviceThatIsNotOpenFails(): void
+    /**
+     * @param Closure(DioTransport): mixed $operation
+     */
+    #[DataProvider('operationsOnAClosedDevice')]
+    public function testUsingADeviceThatIsNotOpenFails(Closure $operation): void
     {
         $this->expectException(TransportException::class);
         $this->expectExceptionMessage('The serial device [/dev/serial0] is not open.');
 
-        $this->transport()->read();
+        $operation($this->transport());
+    }
+
+    /**
+     * @return array<string, array{Closure(DioTransport): mixed}>
+     */
+    public static function operationsOnAClosedDevice(): array
+    {
+        return [
+            'read' => [fn (DioTransport $transport): mixed => $transport->read()],
+            'write' => [fn (DioTransport $transport): mixed => $transport->write('x')],
+            'flush' => [fn (DioTransport $transport): mixed => $transport->flush()],
+        ];
+    }
+
+    public function testABaudRateTheExtensionDoesNotAcceptFails(): void
+    {
+        $this->expectException(ValueError::class);
+        $this->expectExceptionMessage('invalid baud rate 921600');
+
+        (new DioTransport('/dev/serial0', 921600, 8, 1, Parity::None, false, 1.0, 0.01))->open();
     }
 
     protected function transport(Parity $parity = Parity::None): DioTransport

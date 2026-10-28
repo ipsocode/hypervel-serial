@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Ipsocode\Serial\Tests\Unit;
 
+use Hypervel\Cache\ArrayStore;
+use Hypervel\Cache\Repository;
 use Hypervel\Testing\UnitTestCase;
 use Ipsocode\Serial\Buffer;
 use Ipsocode\Serial\Exceptions\TimeoutException;
@@ -12,6 +14,7 @@ use Ipsocode\Serial\Request;
 use Ipsocode\Serial\Response;
 use Ipsocode\Serial\RetryPolicy;
 use Ipsocode\Serial\Sequences\Counter;
+use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Tests\Fixtures\StatusResult;
 use Ipsocode\Serial\Tests\Fixtures\TestCommand;
 
@@ -77,6 +80,26 @@ class ValuesTest extends UnitTestCase
         $counter->reset();
 
         $this->assertSame(1, $counter->next($request));
+    }
+
+    public function testSharedCounterContinuesTheSequenceOfEveryCounterSharingIt(): void
+    {
+        $store = new Repository(new ArrayStore);
+        $first = new SharedCounter($store, 'sequence', start: 1, max: 3);
+        $second = new SharedCounter($store, 'sequence', start: 1, max: 3);
+        $request = new Request(1);
+
+        $this->assertSame([1, 2, 3, 1, 2], [
+            $first->next($request),
+            $second->next($request),
+            $first->next($request),
+            $second->next($request),
+            $first->next($request),
+        ]);
+
+        $second->reset();
+
+        $this->assertSame(1, $first->next($request));
     }
 
     public function testCounterDefaultsToSixteenBits(): void

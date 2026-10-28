@@ -20,7 +20,7 @@ use Ipsocode\Serial\Request;
 $result = Serial::connection()->transact(new Request(code: 0x04, payload: "\x00\x03", subCode: 1));
 ```
 
-The connection opens its device on the first transaction, and discards any bytes that arrived before the request, so a late reply to an earlier request is never mistaken for this one's.
+The connection opens its device on the first transaction, and discards any bytes that arrived before the request, so a reply that arrived between transactions is never mistaken for this one's. A reply that arrives later is caught only by the protocol's sequence check in `validate`; see [Turning Replies Into Results](protocols.md#turning-replies-into-results). The connection skips any frame that `validate` rejects with a `FrameException`, and goes on reading for the reply to this request until its timeout passes.
 
 A command sends on the default connection. To send it on another, override the command's `serialConnection` method:
 

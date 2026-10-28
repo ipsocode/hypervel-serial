@@ -76,9 +76,13 @@ A protocol turns a request into bytes and the device's reply into a result. Most
 namespace App\Serial;
 
 use Ipsocode\Serial\Checksums\Crc;
+use Ipsocode\Serial\Contracts\Result;
 use Ipsocode\Serial\Encodings\HexAscii;
+use Ipsocode\Serial\Exceptions\FrameException;
+use Ipsocode\Serial\Frame;
 use Ipsocode\Serial\Protocols\FramedProtocol;
 use Ipsocode\Serial\Request;
+use Ipsocode\Serial\Response;
 
 class DeviceProtocol extends FramedProtocol
 {
@@ -101,8 +105,19 @@ class DeviceProtocol extends FramedProtocol
     {
         return unpack('nsequence/nstatus/ncode/nlength', $header);
     }
+
+    public function validate(Frame $frame, Request $request): Result
+    {
+        if ($frame->header['sequence'] !== $request->sequence + 1) {
+            throw new FrameException('The device replied to another request.');
+        }
+
+        return Status::tryFrom($frame->header['status']) ?? new Response($frame);
+    }
 }
 ```
+
+The default `validate` accepts every frame, so a reply that arrives after its request timed out would be returned as the next request's result. This `validate` rejects a reply whose sequence does not follow the request's, and the connection skips it. It also turns the device's status into the result: `Status` stands for a backed enum of your device's status codes, as [Protocols](protocols.md#turning-replies-into-results) describes, so a reply that reports an error is no longer a success.
 
 Name the protocol in the connection's configuration:
 

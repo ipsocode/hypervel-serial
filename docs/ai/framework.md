@@ -26,7 +26,8 @@ hypervel-porting MCP server is set up, its `read_doc` reads a page, or one secti
   `null` whenever `read()` returns 0 or less; `dio_write()` returns -1, with a warning, on any
   failure, `EAGAIN` included; `dio_tcsetattr()` reads each setting as an integer, throws a
   `ValueError` for one it does not accept, turns RTS/CTS flow control on unless `flow_control` is 0,
-  and always returns `true`. `tests/Fixtures/dio.php` emulates exactly this.
+  and always returns `true`. `tests/Fixtures/dio.php` emulates this, including the `ValueError` for a baud rate the
+  extension rejects (the standard rates only) and the warning from a failed write.
 
 ## Default References
 

@@ -7,11 +7,14 @@ namespace Ipsocode\Serial;
 use Closure;
 use Hypervel\Contracts\Cache\Lock;
 use Hypervel\Contracts\Cache\LockProvider;
+use Hypervel\Contracts\Cache\Repository;
 use Hypervel\Support\MultipleInstanceManager;
 use InvalidArgumentException;
 use Ipsocode\Serial\Contracts\Protocol;
+use Ipsocode\Serial\Contracts\Sequence;
 use Ipsocode\Serial\Contracts\Transport;
 use Ipsocode\Serial\Sequences\Counter;
+use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Testing\SimulatedProtocol;
 use Ipsocode\Serial\Transports\DioTransport;
 use Ipsocode\Serial\Transports\MemoryTransport;
@@ -119,41 +122,68 @@ class SerialManager extends MultipleInstanceManager
     protected function createConnection(string $name, array $config, Transport $transport, Protocol $protocol): Connection
     {
         $lock = $config['lock'] ?? null;
+        $store = $lock === null ? null : $this->app->make('cache')->store($lock['store'] ?? null);
 
         return new Connection(
             name: $name,
             transport: $transport,
             protocol: $protocol,
-            sequence: $this->app->makeTransient($config['sequence'] ?? Counter::class),
+            sequence: $this->createSequence($name, $config, $store),
             retryPolicy: new RetryPolicy($config['retries'], $config['retry_delay']),
             timeout: $config['timeout'],
             pollInterval: $config['poll_interval'],
             events: $this->app->make('events'),
             logger: isset($config['log']) ? $this->app->make('log')->channel($config['log']) : null,
-            lock: $lock === null ? null : $this->createLock($name, $lock),
+            lock: $store === null ? null : $this->createLock($name, $this->lockProvider($name, $store), $lock['seconds']),
             lockWait: $lock === null ? 0 : $lock['wait'],
         );
     }
 
     /**
-     * Create the factory of the cross-process lock a connection's hold of its device takes.
+     * Create the sequence that numbers a connection's requests.
      *
-     * @param array{store?: null|string, seconds: int, wait: int} $config
-     * @return Closure(): Lock
+     * The default counter keeps its number in the lock's cache store, so processes sharing the
+     * device continue one sequence and a late reply to one is never taken for another's.
+     *
+     * @param array<string, mixed> $config
+     */
+    protected function createSequence(string $name, array $config, ?Repository $store): Sequence
+    {
+        $class = $config['sequence'] ?? Counter::class;
+
+        if ($store !== null && $class === Counter::class) {
+            return new SharedCounter($store, "serial:{$name}:sequence");
+        }
+
+        return $this->app->makeTransient($class);
+    }
+
+    /**
+     * Get the lock provider behind the cache store of a connection's cross-process lock.
      *
      * @throws InvalidArgumentException when the cache store cannot hold locks
      */
-    protected function createLock(string $name, array $config): Closure
+    protected function lockProvider(string $name, Repository $store): LockProvider
     {
-        $store = $this->app->make('cache')->store($config['store'] ?? null)->getStore();
+        $provider = $store->getStore();
 
-        if (! $store instanceof LockProvider) {
+        if (! $provider instanceof LockProvider) {
             throw new InvalidArgumentException("The cache store of the [{$name}] serial connection's lock cannot hold locks.");
         }
 
+        return $provider;
+    }
+
+    /**
+     * Create the factory of the cross-process lock a connection's hold of its device takes.
+     *
+     * @return Closure(): Lock
+     */
+    protected function createLock(string $name, LockProvider $provider, int $seconds): Closure
+    {
         // A new lock for each hold gives each hold its own owner, even in workers forked from
         // a process that resolved the connection.
-        return fn (): Lock => $store->lock("serial:{$name}", $config['seconds']);
+        return fn (): Lock => $provider->lock("serial:{$name}", $seconds);
     }
 
     /**

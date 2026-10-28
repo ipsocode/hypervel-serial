@@ -19,6 +19,7 @@ use Ipsocode\Serial\Exceptions\TransportException;
 use Ipsocode\Serial\Request;
 use Ipsocode\Serial\RetryPolicy;
 use Ipsocode\Serial\Sequences\Counter;
+use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Testing\FakeTransport;
 use Ipsocode\Serial\Tests\Fixtures\HeaderProtocol;
 use Ipsocode\Serial\Tests\Fixtures\StatusResult;
@@ -105,6 +106,29 @@ class ConnectionTest extends TestCase
 
         $this->assertTrue($this->connection($transport)->transact(new Request(6))->success());
         $this->assertSame([0, 0], array_map($this->sequenceOf(...), $transport->written()));
+    }
+
+    public function testTransactSkipsALateReplyToAnEarlierRequestAndReturnsItsOwn(): void
+    {
+        $transport = new FakeTransport([
+            fn (string $written): string => $this->reply(7, 'late') . $this->reply($this->sequenceOf($written), 'own'),
+        ]);
+
+        $result = $this->connection($transport)->transact(new Request(6), retries: 0);
+
+        $this->assertSame('own', $result->data());
+        $this->assertCount(1, $transport->written());
+    }
+
+    public function testTransactTimesOutWhenOnlyLateRepliesArrive(): void
+    {
+        Sleep::fake(syncWithCarbon: true);
+
+        $transport = new FakeTransport([$this->reply(7, 'late')]);
+
+        $this->expectException(TimeoutException::class);
+
+        $this->connection($transport)->transact(new Request(6), retries: 0);
     }
 
     public function testTransactTriesAgainWhileTheReplyIsNotASuccess(): void
@@ -392,6 +416,23 @@ class ConnectionTest extends TestCase
         $other->release();
 
         $this->assertSame('free', $connection->exclusive(fn (): string => 'free'));
+    }
+
+    public function testProcessesSharingASequenceStoreRejectEachOthersLateReplies(): void
+    {
+        $store = $this->app->make('cache')->store('array');
+        $first = $this->connection(new FakeTransport, ['sequence' => new SharedCounter($store, 'sequence')]);
+        $secondTransport = new FakeTransport([fn (string $written): string => $this->reply(0, 'late') . $this->reply($this->sequenceOf($written), 'own')]);
+        $second = $this->connection($secondTransport, ['sequence' => new SharedCounter($store, 'sequence')]);
+
+        try {
+            $first->transact(new Request(6), timeout: 0.01, retries: 0);
+            $this->fail('The first process did not time out.');
+        } catch (TimeoutException) {
+        }
+
+        $this->assertSame('own', $second->transact(new Request(6))->data());
+        $this->assertSame(1, $this->sequenceOf($secondTransport->written()[0]));
     }
 
     public function testDisconnectClosesTheDevice(): void
