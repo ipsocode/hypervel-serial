@@ -19,6 +19,7 @@ use Ipsocode\Serial\Contracts\Transport;
 use Ipsocode\Serial\Events\FrameReceived;
 use Ipsocode\Serial\Events\FrameSent;
 use Ipsocode\Serial\Events\TransactionFailed;
+use Ipsocode\Serial\Exceptions\FrameException;
 use Ipsocode\Serial\Exceptions\ReservedException;
 use Ipsocode\Serial\Exceptions\SerialException;
 use Ipsocode\Serial\Exceptions\TimeoutException;
@@ -317,25 +318,23 @@ class Connection
 
             $this->sent($request, $bytes);
 
-            $frame = $this->receive($timeout);
+            return $this->await($request, $timeout);
         } catch (TransportException $exception) {
             // The next attempt opens the device again, which recovers one that went away and came back.
             $this->transport->close();
 
             throw $exception;
         }
-
-        $this->received($request, $frame);
-
-        return $this->protocol->validate($frame, $request);
     }
 
     /**
-     * Read from the device until the protocol finds a complete frame.
+     * Read from the device until the protocol finds a frame that answers the request.
+     *
+     * A frame the protocol rejects as another request's reply, such as a late one, is skipped.
      *
      * @throws SerialException
      */
-    protected function receive(float $timeout): Frame
+    protected function await(Request $request, float $timeout): Result
     {
         $buffer = new Buffer;
         $deadline = CarbonImmutable::now()->addMicroseconds((int) ($timeout * 1_000_000));
@@ -343,8 +342,14 @@ class Connection
         while (true) {
             $buffer->append($this->transport->read());
 
-            if (($frame = $this->protocol->decode($buffer)) !== null) {
-                return $frame;
+            while (($frame = $this->protocol->decode($buffer)) !== null) {
+                $this->received($request, $frame);
+
+                try {
+                    return $this->protocol->validate($frame, $request);
+                } catch (FrameException) {
+                    continue;
+                }
             }
 
             if (CarbonImmutable::now()->greaterThanOrEqualTo($deadline)) {

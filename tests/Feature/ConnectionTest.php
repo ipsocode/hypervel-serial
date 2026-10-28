@@ -97,14 +97,35 @@ class ConnectionTest extends TestCase
         Sleep::assertSlept(fn ($duration): bool => $duration->totalMilliseconds === 100.0, 1);
     }
 
-    public function testTransactTriesAgainAfterAReplyToAnotherRequest(): void
+    public function testTransactTriesAgainAfterOnlyRepliesToOtherRequests(): void
     {
-        Sleep::fake();
+        Sleep::fake(syncWithCarbon: true);
 
         $transport = new FakeTransport([$this->reply(7), $this->echo()]);
 
         $this->assertTrue($this->connection($transport)->transact(new Request(6))->success());
         $this->assertSame([0, 0], array_map($this->sequenceOf(...), $transport->written()));
+    }
+
+    public function testTransactSkipsALateReplyAndReturnsItsOwn(): void
+    {
+        Sleep::fake();
+
+        $transport = new FakeTransport([fn (string $written): string => $this->reply(7, 'late') . $this->reply($this->sequenceOf($written), 'own')]);
+
+        $result = $this->connection($transport)->transact(new Request(6), retries: 0);
+
+        $this->assertSame('own', $result->data());
+        $this->assertCount(1, $transport->written());
+    }
+
+    public function testTransactSkipsALateReplyThatArrivesInPieces(): void
+    {
+        Sleep::fake();
+
+        $transport = new FakeTransport([fn (string $written): string => $this->reply(7, 'late') . $this->reply($this->sequenceOf($written), 'own')], chunkSize: 3);
+
+        $this->assertSame('own', $this->connection($transport)->transact(new Request(6), retries: 0)->data());
     }
 
     public function testTransactTriesAgainWhileTheReplyIsNotASuccess(): void
