@@ -120,6 +120,30 @@ class DioTransportTest extends UnitTestCase
         $transport->write('hello');
     }
 
+    public function testAWriteToAnUnpluggedDeviceFailsAtOnce(): void
+    {
+        $transport = $this->transport();
+        $transport->open();
+        FakeDio::$unplugged = true;
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('Unable to write to the serial device [/dev/serial0]: dio_write(): cannot write data to the file descriptor 5, Input/output error');
+
+        $transport->write('hello');
+    }
+
+    public function testAReadFromAnUnpluggedDeviceFailsAtOnce(): void
+    {
+        $transport = $this->transport();
+        $transport->open();
+        FakeDio::$unplugged = true;
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('The serial device [/dev/serial0] is no longer available.');
+
+        $transport->read();
+    }
+
     public function testFlushDiscardsTheBytesThatHaveArrived(): void
     {
         $transport = $this->transport();

@@ -70,6 +70,8 @@ The `dio` transport opens the device through the [dio](https://pecl.php.net/pack
 
 The extension accepts only the standard baud rates, 50 to 460800 on Linux (such as 9600, 19200, 38400, 57600, 115200, 230400 and 460800). Any other rate, such as 250000, 921600 or 1000000, makes every transaction throw a `ValueError`, which is a configuration error and is not retried. Use the `stream` transport for a rate the extension does not accept.
 
+A device that is unplugged while the connection is open makes the next read or write throw a `TransportException` at once, instead of looking like a device that has nothing to send. The connection then closes the device and reopens it on the next attempt. A read detects this when the device's node has been removed, as it is when a USB adapter is unplugged; a device that stays present but hangs up is not detected. A device that is merely quiet still reads as an empty string.
+
 <a name="the-memory-transport"></a>
 ### The memory transport
 
