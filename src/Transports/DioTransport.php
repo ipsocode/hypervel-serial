@@ -103,7 +103,7 @@ class DioTransport implements Transport
     {
         // dio returns null whenever a read yields nothing, which on a non-blocking device is
         // most often that no bytes have arrived.
-        return dio_read($this->handle(), $length) ?? ''; // @phpstan-ignore nullCoalesce.expr (dio_read() returns null when a read yields nothing, which its stub leaves out)
+        return dio_read($this->handle(), $length) ?? ''; // @phpstan-ignore nullCoalesce.expr (dio_read() returns null when a read yields nothing, and PHPStan's function map types it as string, without that null)
     }
 
     /**
