@@ -8,7 +8,7 @@ use ValueError;
 
 /**
  * The device behind the emulated ext-dio functions in dio.php, which return what the
- * extension's own do: dio_read() null when a read yields nothing, dio_write() -1, with a warning, when it fails, and dio_tcsetattr() a ValueError for a baud rate it does not accept.
+ * extension's own do: dio_read() null when a read yields nothing, dio_write() -1, with a warning, when it fails, dio_stat() an array whose nlink is 0 for a device that was unplugged, and dio_tcsetattr() a ValueError for a baud rate it does not accept.
  */
 class FakeDio
 {
@@ -43,13 +43,18 @@ class FakeDio
 
     public static bool $closed = false;
 
+    /**
+     * Whether the device was unplugged: reads yield nothing and writes fail with an I/O error.
+     */
+    public static bool $unplugged = false;
+
     public static function reset(): void
     {
         static::$openFails = false;
         static::$device = static::$flags = null;
         static::$settings = static::$writeResults = [];
         static::$incoming = static::$written = '';
-        static::$closed = false;
+        static::$closed = static::$unplugged = false;
     }
 
     /**
@@ -99,13 +104,25 @@ class FakeDio
 
     /**
      * @param resource $handle
+     *
+     * @return array{nlink: int}
+     */
+    public static function stat(mixed $handle): array
+    {
+        return ['nlink' => static::$unplugged ? 0 : 1];
+    }
+
+    /**
+     * @param resource $handle
      */
     public static function write(mixed $handle, string $bytes): int
     {
-        $result = array_shift(static::$writeResults) ?? strlen($bytes);
+        $result = static::$unplugged ? -1 : array_shift(static::$writeResults) ?? strlen($bytes);
 
         if ($result < 0) {
-            trigger_error('dio_write(): cannot write data to the file descriptor', E_USER_WARNING);
+            $reason = static::$unplugged ? 'Input/output error' : 'Resource temporarily unavailable';
+
+            trigger_error("dio_write(): cannot write data to the file descriptor 5, {$reason}", E_USER_WARNING);
         }
 
         if ($result > 0) {

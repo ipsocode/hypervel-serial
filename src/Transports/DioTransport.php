@@ -16,6 +16,16 @@ use Ipsocode\Serial\Parity;
 class DioTransport implements Transport
 {
     /**
+     * The text of the warning dio_write() raises for a device that cannot take more bytes yet.
+     */
+    protected const WOULD_BLOCK_MESSAGE = 'Resource temporarily unavailable';
+
+    /**
+     * The text of the warning dio_write() raises for an interrupted write.
+     */
+    protected const INTERRUPTED_MESSAGE = 'Interrupted system call';
+
+    /**
      * The open device.
      *
      * @var null|resource
@@ -101,9 +111,23 @@ class DioTransport implements Transport
      */
     public function read(int $length = 1024): string
     {
-        // dio returns null whenever a read yields nothing, which on a non-blocking device is
-        // most often that no bytes have arrived.
-        return dio_read($this->handle(), $length) ?? ''; // @phpstan-ignore nullCoalesce.expr (dio_read() returns null when a read yields nothing, and PHPStan's function map types it as string, without that null)
+        $handle = $this->handle();
+
+        $bytes = dio_read($handle, $length);
+
+        if ($bytes !== null) { // @phpstan-ignore notIdentical.alwaysTrue (dio_read() returns null when a read yields nothing, and PHPStan's function map types it as string, without that null)
+            return $bytes;
+        }
+
+        // dio returns null for any read(2) result of 0 or less, so "no bytes yet" cannot be told
+        // from the end of file or I/O error of a device that was unplugged. An unplugged device
+        // has no link left to its node; one that is merely quiet still does.
+        // @phpstan-ignore deadCode.unreachable (follows from the dio_read() null that PHPStan's function map omits)
+        if ((@dio_stat($handle)['nlink'] ?? 0) === 0) {
+            throw new TransportException("The serial device [{$this->device}] is no longer available.");
+        }
+
+        return '';
     }
 
     /**
@@ -117,12 +141,14 @@ class DioTransport implements Transport
         $deadline = CarbonImmutable::now()->addMicroseconds((int) ($this->timeout * 1_000_000));
 
         while ($bytes !== '') {
-            // dio reports a device that cannot take more bytes yet as a failed write, the same
-            // as any other failure, so every failure waits for the deadline.
+            error_clear_last();
+
             $written = @dio_write($handle, $bytes);
 
             if ($written > 0) {
                 $bytes = substr($bytes, $written);
+            } elseif ($written < 0) {
+                $this->failUnlessWouldBlock(error_get_last()['message'] ?? '');
             }
 
             if ($bytes === '') {
@@ -145,6 +171,20 @@ class DioTransport implements Transport
     public function flush(): void
     {
         while ($this->read() !== '');
+    }
+
+    /**
+     * Throw if the warning of a failed write names anything but a device that is not ready yet.
+     *
+     * @throws TransportException
+     */
+    protected function failUnlessWouldBlock(string $warning): void
+    {
+        if ($warning === '' || str_contains($warning, self::WOULD_BLOCK_MESSAGE) || str_contains($warning, self::INTERRUPTED_MESSAGE)) {
+            return;
+        }
+
+        throw new TransportException("Unable to write to the serial device [{$this->device}]: {$warning}");
     }
 
     /**
