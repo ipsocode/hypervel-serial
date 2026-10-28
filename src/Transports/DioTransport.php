@@ -141,14 +141,26 @@ class DioTransport implements Transport
         $deadline = CarbonImmutable::now()->addMicroseconds((int) ($this->timeout * 1_000_000));
 
         while ($bytes !== '') {
-            error_clear_last();
+            $warning = '';
 
-            $written = @dio_write($handle, $bytes);
+            // The application's error handler returns without setting error_get_last(), so the
+            // warning is caught here instead.
+            set_error_handler(function (int $level, string $message) use (&$warning): bool {
+                $warning = $message;
+
+                return true;
+            });
+
+            try {
+                $written = dio_write($handle, $bytes);
+            } finally {
+                restore_error_handler();
+            }
 
             if ($written > 0) {
                 $bytes = substr($bytes, $written);
             } elseif ($written < 0) {
-                $this->failUnlessWouldBlock(error_get_last()['message'] ?? '');
+                $this->failUnlessWouldBlock($warning);
             }
 
             if ($bytes === '') {

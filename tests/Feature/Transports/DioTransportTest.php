@@ -132,6 +132,26 @@ class DioTransportTest extends UnitTestCase
         $transport->write('hello');
     }
 
+    public function testAWriteToAnUnpluggedDeviceFailsAtOnceUnderTheApplicationsErrorHandler(): void
+    {
+        // The framework's handler returns without setting error_get_last().
+        set_error_handler(static function (int $level, string $message): void {
+        });
+
+        try {
+            $transport = $this->transport();
+            $transport->open();
+            FakeDio::$unplugged = true;
+
+            $this->expectException(TransportException::class);
+            $this->expectExceptionMessage('Input/output error');
+
+            $transport->write('hello');
+        } finally {
+            restore_error_handler();
+        }
+    }
+
     public function testAReadFromAnUnpluggedDeviceFailsAtOnce(): void
     {
         $transport = $this->transport();
