@@ -103,7 +103,7 @@ These settings may be left out of a connection; each says what leaving it out me
 <a name="sequence-numbers"></a>
 ### Sequence numbers
 
-The connection numbers each request before the protocol encodes it, using the class `sequence` names, and the protocol writes the number into the frame if its header has one. `Ipsocode\Serial\Sequences\Counter`, the default, counts up from 0 and starts over after 65535. A device with its own rules, such as one that expects a continuing sequence only within a transfer, gets a class of its own that implements `Ipsocode\Serial\Contracts\Sequence`. Each connection makes its own instance.
+The connection numbers each request before the protocol encodes it, using the class `sequence` names, and the protocol writes the number into the frame if its header has one. `Ipsocode\Serial\Sequences\Counter`, the default, counts up from 0 and starts over after 65535. A device with its own rules, such as one that expects a continuing sequence only within a transfer, gets a class of its own that implements `Ipsocode\Serial\Contracts\Sequence`. Each connection makes its own instance, except that a connection with a [lock](#a-lock-across-processes) keeps the default `Counter`'s number in the lock's cache store, so every process sharing the device continues one sequence. A sequence class of your own keeps whatever state it keeps, so it must share its number across processes itself.
 
 <a name="a-lock-across-processes"></a>
 ### A lock across processes
@@ -114,7 +114,7 @@ Transactions on a connection never interleave within one process. When more than
 'lock' => ['store' => 'redis', 'seconds' => 10, 'wait' => 5],
 ```
 
-`store` is the cache store, the default store when it is `null`; `seconds` is how long the lock lasts, so set it longer than the longest hold; `wait` is how long to wait for another process to let go before failing with a `LockTimeoutException`. Without `lock`, nothing is locked across processes.
+`store` is the cache store, the default store when it is `null`; `seconds` is how long the lock lasts, so set it longer than the longest hold; `wait` is how long to wait for another process to let go before failing with a `LockTimeoutException`. The default `Counter` also keeps its number in this store, under `serial:<connection>:sequence`, so the processes continue one sequence and the [sequence check](protocols.md#turning-replies-into-results) rejects a late reply to another process's request. It costs two more store round trips per transaction. Without `lock`, nothing is locked across processes.
 
 <a name="logging"></a>
 ### Logging

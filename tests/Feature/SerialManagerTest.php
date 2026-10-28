@@ -196,6 +196,15 @@ class SerialManagerTest extends TestCase
         $this->assertTrue($locked);
     }
 
+    public function testTheLockSettingKeepsTheSequenceInTheLocksStore(): void
+    {
+        $this->app->get('config')->set('serial.connections.simulated.lock', ['store' => 'array', 'seconds' => 10, 'wait' => 0]);
+
+        Serial::connection('simulated')->transact(new Request(6));
+
+        $this->assertSame(1, $this->app->make('cache')->store('array')->get('serial:simulated:sequence'));
+    }
+
     public function testTheLockSettingNeedsAStoreThatHoldsLocks(): void
     {
         $this->app->make('cache')->extend('no-locks', fn () => $this->app->make('cache')->repository(new NoLockStore));
