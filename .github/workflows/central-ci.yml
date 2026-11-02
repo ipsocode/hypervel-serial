@@ -1,0 +1,59 @@
+name: central-ci
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conventions:
+    name: Central conventions
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ipsocode/hypervel-packages-ci/conventions@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+
+  php84:
+    name: Central PHP 8.4
+    needs: conventions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/ipsocode/hypervel/ci-alpine:8.4-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ipsocode/hypervel-packages-ci/install@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+        with:
+          php: '8.4'
+      - uses: ipsocode/hypervel-packages-ci/suite@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+        with:
+          php: '8.4'
+          style: 'true'
+          min-coverage: '100'
+
+  php85:
+    name: Central PHP 8.5
+    needs: php84
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    container:
+      image: ghcr.io/ipsocode/hypervel/ci-alpine:8.5-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ipsocode/hypervel-packages-ci/install@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+        with:
+          php: '8.5'
+      - uses: ipsocode/hypervel-packages-ci/suite@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+        with:
+          php: '8.5'
