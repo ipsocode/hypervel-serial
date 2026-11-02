@@ -188,6 +188,30 @@ class DioTransportTest extends UnitTestCase
         $this->assertFalse($transport->isOpen());
     }
 
+    public function testCloseTurnsFlowControlOffSoQueuedOutputCanLeave(): void
+    {
+        $transport = $this->transport(flowControl: true);
+        $transport->open();
+        $opened = FakeDio::$settings;
+
+        $transport->close();
+
+        $this->assertCount(2, FakeDio::$settingsHistory);
+        $this->assertSame(array_replace($opened, ['flow_control' => 0]), FakeDio::$settings);
+        $this->assertTrue(FakeDio::$closed);
+    }
+
+    public function testCloseLeavesTheSettingsAloneWithoutFlowControl(): void
+    {
+        $transport = $this->transport();
+        $transport->open();
+
+        $transport->close();
+
+        $this->assertCount(1, FakeDio::$settingsHistory);
+        $this->assertTrue(FakeDio::$closed);
+    }
+
     /**
      * @param Closure(DioTransport): mixed $operation
      */
@@ -220,8 +244,8 @@ class DioTransportTest extends UnitTestCase
         (new DioTransport('/dev/serial0', 921600, 8, 1, Parity::None, false, 1.0, 0.01))->open();
     }
 
-    protected function transport(Parity $parity = Parity::None): DioTransport
+    protected function transport(Parity $parity = Parity::None, bool $flowControl = false): DioTransport
     {
-        return new DioTransport('/dev/serial0', 115200, 8, 1, $parity, false, 1.0, 0.01);
+        return new DioTransport('/dev/serial0', 115200, 8, 1, $parity, $flowControl, 1.0, 0.01);
     }
 }

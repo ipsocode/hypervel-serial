@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Ipsocode\Serial;
 
 use Closure;
+use Hypervel\Cache\Repository;
 use Hypervel\Contracts\Cache\LockProvider;
 use Hypervel\Contracts\Cache\RefreshableLock;
-use Hypervel\Contracts\Cache\Repository;
 use Hypervel\Support\MultipleInstanceManager;
 use InvalidArgumentException;
 use Ipsocode\Serial\Contracts\Protocol;

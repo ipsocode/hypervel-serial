@@ -120,6 +120,6 @@ A connection only builds an event when something listens for it. The connection'
 <a name="running-on-hypervel"></a>
 ## Running on Hypervel
 
-A connection belongs to the worker or process that resolved it, and every coroutine in it shares the connection, as they share the device. Waiting for a reply yields to the other coroutines, so a transaction never blocks the worker.
+A connection belongs to the worker or process that resolved it, and every coroutine in it shares the connection, as they share the device. Waiting for a reply yields to the other coroutines, so a transaction does not block the worker while it waits. The [dio transport](configuration.md#the-dio-transport) is the exception when it opens or closes a device that is hung: those calls cannot yield, and stall every coroutine on the worker until they return.
 
 A device can be opened by one process at a time without confusion, so give the device to one process, such as a Hypervel server process, and have the other workers ask that process to send. If more than one process must open the device, set the connection's [lock](configuration.md#a-lock-across-processes).

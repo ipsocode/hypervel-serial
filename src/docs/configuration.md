@@ -72,6 +72,13 @@ The extension accepts only the standard baud rates, 50 to 460800 on Linux (such 
 
 A device that is unplugged while the connection is open makes the next read or write throw a `TransportException` at once, instead of looking like a device that has nothing to send. The connection then closes the device and reopens it on the next attempt. A read detects this when the device's node has been removed, as it is when a USB adapter is unplugged; a device that stays present but hangs up is not detected. A device that is merely quiet still reads as an empty string.
 
+Opening and closing the device are plain system calls that cannot yield to the other coroutines, so a hung device can stall the whole worker while they run:
+
+- **Closing.** With `flow_control` on, a device that is powered off or holds CTS low keeps the frames the connection queued from leaving, and closing the port waits for them, up to the port's closing wait, 30 seconds by default, once for each page of queued output. The transport turns flow control off just before it closes the device, so the queued frames leave at line speed instead of waiting for CTS; the device receives them if it comes back.
+- **Opening.** A USB adapter, such as a CP210x or FTDI, whose firmware hangs while it stays plugged in blocks the open for about 5 seconds for each of the two control transfers it makes, and again on every retry. The transport cannot shorten this.
+
+Where a hung device is likely, use the `stream` transport, which opens the device without blocking.
+
 <a name="the-memory-transport"></a>
 ### The memory transport
 
