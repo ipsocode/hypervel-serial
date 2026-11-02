@@ -215,7 +215,7 @@ class Connection
      */
     protected function attempt(Request $request, ?float $timeout, ?int $retries): Result
     {
-        $request = $request->withSequence($this->sequence->next($request));
+        $numbered = null;
         $timeout ??= $this->timeout;
         $retryPolicy = $retries === null ? $this->retryPolicy : $this->retryPolicy->withTimes($retries);
 
@@ -223,7 +223,9 @@ class Connection
             try {
                 $this->keepLock();
 
-                $outcome = $this->exchange($request, $timeout);
+                $numbered ??= $request->withSequence($this->sequence->next($request));
+
+                $outcome = $this->exchange($numbered, $timeout);
             } catch (SerialException $exception) {
                 $outcome = $exception;
             }
@@ -232,13 +234,13 @@ class Connection
                 break;
             }
 
-            $this->logger?->warning('Serial transaction attempt failed; trying again.', $this->context($request, $attempt, $outcome));
+            $this->logger?->warning('Serial transaction attempt failed; trying again.', $this->context($numbered ?? $request, $attempt, $outcome));
 
             Sleep::sleep($retryPolicy->delay);
         }
 
         if ($outcome instanceof SerialException || ! $outcome->success()) {
-            $this->failed($request, $attempt, $outcome);
+            $this->failed($numbered ?? $request, $attempt, $outcome);
         }
 
         if ($outcome instanceof SerialException) {

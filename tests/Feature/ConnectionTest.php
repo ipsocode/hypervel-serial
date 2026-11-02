@@ -483,6 +483,35 @@ class ConnectionTest extends TestCase
         $this->assertTrue($store->lock('serial:device')->isLocked());
     }
 
+    public function testATransactionDoesNotNumberTheRequestWhenAnotherProcessTookTheLock(): void
+    {
+        $cache = $this->app->make('cache')->store('array');
+        $store = $cache->getStore();
+        $store->put('serial:device:sequence', 5, 600);
+        $transport = new FakeTransport([$this->echo()]);
+        $connection = $this->connection($transport, [
+            'lock' => fn () => $store->lock('serial:device', 10),
+            'lockSeconds' => 10,
+            'sequence' => new SharedCounter($cache, 'serial:device:sequence'),
+        ]);
+
+        try {
+            $connection->exclusive(function (Connection $connection) use ($store): void {
+                $store->lock('serial:device')->forceRelease();
+                $this->assertTrue($store->lock('serial:device', 10)->acquire());
+
+                $this->travel(6)->seconds();
+
+                $connection->transact(new Request(6));
+            });
+            $this->fail('The lost lock was not reported.');
+        } catch (LockLostException) {
+            $this->assertSame(5, $cache->get('serial:device:sequence'));
+        }
+
+        $transport->assertNothingWritten();
+    }
+
     public function testAnErrorIsLoggedWhenTheLockWasLostByTheEndOfTheHold(): void
     {
         $store = $this->app->make('cache')->store('array')->getStore();
