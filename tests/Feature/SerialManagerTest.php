@@ -16,6 +16,7 @@ use Ipsocode\Serial\SerialManager;
 use Ipsocode\Serial\SerialServiceProvider;
 use Ipsocode\Serial\Testing\FakeTransport;
 use Ipsocode\Serial\Testing\SimulatedProtocol;
+use Ipsocode\Serial\Tests\Fixtures\CacheLockStore;
 use Ipsocode\Serial\Tests\Fixtures\CountingSimulator;
 use Ipsocode\Serial\Tests\Fixtures\HeaderProtocol;
 use Ipsocode\Serial\Tests\Fixtures\NoLockStore;
@@ -213,6 +214,18 @@ class SerialManagerTest extends TestCase
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("The cache store of the [simulated] serial connection's lock cannot hold locks.");
+
+        Serial::connection('simulated');
+    }
+
+    public function testTheLockSettingNeedsLocksThatCanBeRefreshed(): void
+    {
+        $this->app->make('cache')->extend('cache-locks', fn () => $this->app->make('cache')->repository(new CacheLockStore));
+        $this->app->get('config')->set('cache.stores.cache-locks', ['driver' => 'cache-locks']);
+        $this->app->get('config')->set('serial.connections.simulated.lock', ['store' => 'cache-locks', 'seconds' => 10, 'wait' => 0]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("The cache store of the [simulated] serial connection's lock cannot refresh its locks.");
 
         Serial::connection('simulated');
     }
