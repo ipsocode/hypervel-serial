@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ipsocode/hypervel-packages-ci/conventions@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+      - uses: ipsocode/hypervel-packages-ci/conventions@e9d01f747223aa2ceb47590b22cbf8418a4e9834
 
   php84:
     name: Central PHP 8.4
@@ -31,10 +31,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ipsocode/hypervel-packages-ci/install@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+      - uses: ipsocode/hypervel-packages-ci/install@e9d01f747223aa2ceb47590b22cbf8418a4e9834
         with:
           php: '8.4'
-      - uses: ipsocode/hypervel-packages-ci/suite@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+      - uses: ipsocode/hypervel-packages-ci/suite@e9d01f747223aa2ceb47590b22cbf8418a4e9834
         with:
           php: '8.4'
           style: 'true'
@@ -51,9 +51,38 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ipsocode/hypervel-packages-ci/install@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+      - uses: ipsocode/hypervel-packages-ci/install@e9d01f747223aa2ceb47590b22cbf8418a4e9834
         with:
           php: '8.5'
-      - uses: ipsocode/hypervel-packages-ci/suite@87f20f3a79d3f4204ffcb05b602aaaf860ff038a
+      - uses: ipsocode/hypervel-packages-ci/suite@e9d01f747223aa2ceb47590b22cbf8418a4e9834
         with:
           php: '8.5'
+
+  plan:
+    name: Central publish plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - id: plan
+        uses: ipsocode/hypervel-packages-ci/publish/plan@e9d01f747223aa2ceb47590b22cbf8418a4e9834
+        with:
+          event: workflow_dispatch
+          ref: refs/heads/main
+          bump: auto
+          dry-run: 'true'
+      - name: Show the plan
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          PREVIOUS: ${{ steps.plan.outputs.previous }}
+          BREAKING: ${{ steps.plan.outputs.breaking }}
+          FEATURES: ${{ steps.plan.outputs.features }}
+        run: echo "mode=${MODE} tag=${TAG} previous=${PREVIOUS} breaking=[${BREAKING}] features=[${FEATURES}]"
