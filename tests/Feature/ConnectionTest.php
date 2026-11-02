@@ -6,6 +6,7 @@ namespace Ipsocode\Serial\Tests\Feature;
 
 use Closure;
 use Hypervel\Contracts\Cache\LockTimeoutException;
+use Hypervel\Contracts\Cache\RefreshableLock;
 use Hypervel\Coroutine\Coroutine;
 use Hypervel\Coroutine\WaitGroup;
 use Hypervel\Support\Sleep;
@@ -13,6 +14,7 @@ use Ipsocode\Serial\Connection;
 use Ipsocode\Serial\Events\FrameReceived;
 use Ipsocode\Serial\Events\FrameSent;
 use Ipsocode\Serial\Events\TransactionFailed;
+use Ipsocode\Serial\Exceptions\LockLostException;
 use Ipsocode\Serial\Exceptions\ReservedException;
 use Ipsocode\Serial\Exceptions\TimeoutException;
 use Ipsocode\Serial\Exceptions\TransportException;
@@ -24,6 +26,7 @@ use Ipsocode\Serial\Testing\FakeTransport;
 use Ipsocode\Serial\Tests\Fixtures\HeaderProtocol;
 use Ipsocode\Serial\Tests\Fixtures\StatusResult;
 use Ipsocode\Serial\Tests\TestCase;
+use LogicException;
 use Mockery as m;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
@@ -416,6 +419,159 @@ class ConnectionTest extends TestCase
         $other->release();
 
         $this->assertSame('free', $connection->exclusive(fn (): string => 'free'));
+    }
+
+    public function testAHoldLongerThanHalfTheLocksTimeRefreshesItBeforeTheNextAttempt(): void
+    {
+        $store = $this->app->make('cache')->store('array')->getStore();
+        $transport = new FakeTransport([$this->echo()]);
+        $connection = $this->connection($transport, ['lock' => fn () => $store->lock('serial:device', 10), 'lockSeconds' => 10]);
+
+        $remaining = $connection->exclusive(function (Connection $connection) use ($store): ?float {
+            $this->travel(6)->seconds();
+
+            $connection->transact(new Request(6));
+
+            return $store->lock('serial:device')->getRemainingLifetime();
+        });
+
+        $this->assertGreaterThan(8.0, $remaining);
+        $this->assertCount(1, $transport->written());
+    }
+
+    public function testAHoldShorterThanHalfTheLocksTimeDoesNotRefreshIt(): void
+    {
+        $lock = m::mock(RefreshableLock::class);
+        $lock->shouldReceive('block')->once()->with(0)->andReturn(true);
+        $lock->shouldReceive('release')->once()->andReturn(true);
+        $lock->shouldNotReceive('refresh');
+        $connection = $this->connection(new FakeTransport([$this->echo()]), ['lock' => fn () => $lock, 'lockSeconds' => 10]);
+
+        $connection->exclusive(function (Connection $connection): void {
+            $this->travel(4)->seconds();
+
+            $connection->transact(new Request(6));
+        });
+    }
+
+    public function testATransactionFailsBeforeWritingWhenAnotherProcessTookTheLock(): void
+    {
+        $store = $this->app->make('cache')->store('array')->getStore();
+        $transport = new FakeTransport([$this->echo()]);
+        $connection = $this->connection($transport, ['lock' => fn () => $store->lock('serial:device', 10), 'lockSeconds' => 10]);
+        $failures = 0;
+        $this->app->make('events')->listen(TransactionFailed::class, function () use (&$failures): void {
+            ++$failures;
+        });
+
+        try {
+            $connection->exclusive(function (Connection $connection) use ($store): void {
+                $store->lock('serial:device')->forceRelease();
+                $this->assertTrue($store->lock('serial:device', 10)->acquire());
+
+                $this->travel(6)->seconds();
+
+                $connection->transact(new Request(6));
+            });
+            $this->fail('The lost lock was not reported.');
+        } catch (LockLostException $exception) {
+            $this->assertSame('The cross-process lock of the [device] serial connection expired or was taken by another process, so the device was not used.', $exception->getMessage());
+        }
+
+        $transport->assertNothingWritten();
+        $this->assertSame(1, $failures);
+        $this->assertTrue($store->lock('serial:device')->isLocked());
+    }
+
+    public function testATransactionDoesNotNumberTheRequestWhenAnotherProcessTookTheLock(): void
+    {
+        $cache = $this->app->make('cache')->store('array');
+        $store = $cache->getStore();
+        $store->put('serial:device:sequence', 5, 600);
+        $transport = new FakeTransport([$this->echo()]);
+        $connection = $this->connection($transport, [
+            'lock' => fn () => $store->lock('serial:device', 10),
+            'lockSeconds' => 10,
+            'sequence' => new SharedCounter($cache, 'serial:device:sequence'),
+        ]);
+
+        try {
+            $connection->exclusive(function (Connection $connection) use ($store): void {
+                $store->lock('serial:device')->forceRelease();
+                $this->assertTrue($store->lock('serial:device', 10)->acquire());
+
+                $this->travel(6)->seconds();
+
+                $connection->transact(new Request(6));
+            });
+            $this->fail('The lost lock was not reported.');
+        } catch (LockLostException) {
+            $this->assertSame(5, $cache->get('serial:device:sequence'));
+        }
+
+        $transport->assertNothingWritten();
+    }
+
+    public function testAnErrorIsLoggedWhenTheLockWasLostByTheEndOfTheHold(): void
+    {
+        $store = $this->app->make('cache')->store('array')->getStore();
+        $logger = m::mock(LoggerInterface::class);
+        $logger->shouldReceive('error')->once()->with('The cross-process lock had expired or been taken before the hold ended.', ['connection' => 'device']);
+        $connection = $this->connection(new FakeTransport, ['lock' => fn () => $store->lock('serial:device', 10), 'logger' => $logger]);
+
+        $this->assertSame('done', $connection->exclusive(function () use ($store): string {
+            $store->lock('serial:device')->forceRelease();
+
+            return 'done';
+        }));
+    }
+
+    public function testAFailureReleasingTheLockDoesNotReplaceTheCallbacksFailure(): void
+    {
+        $failure = new LogicException('The callback failed.');
+        $lock = m::mock(RefreshableLock::class);
+        $lock->shouldReceive('block')->once()->andReturn(true);
+        $lock->shouldReceive('release')->once()->andThrow(new RuntimeException('The release failed.'));
+        $connection = $this->connection(new FakeTransport, ['lock' => fn () => $lock]);
+
+        try {
+            $connection->exclusive(fn () => throw $failure);
+            $this->fail('The callback did not fail.');
+        } catch (LogicException $caught) {
+            $this->assertSame($failure, $caught);
+        }
+    }
+
+    public function testAFailureReleasingTheLockIsReportedWhenTheCallbackSucceeded(): void
+    {
+        $failure = new RuntimeException('The release failed.');
+        $lock = m::mock(RefreshableLock::class);
+        $lock->shouldReceive('block')->once()->andReturn(true);
+        $lock->shouldReceive('release')->once()->andThrow($failure);
+        $connection = $this->connection(new FakeTransport, ['lock' => fn () => $lock]);
+
+        try {
+            $connection->exclusive(fn (): string => 'done');
+            $this->fail('The release did not fail.');
+        } catch (RuntimeException $caught) {
+            $this->assertSame($failure, $caught);
+        }
+    }
+
+    public function testACancellationWhileReleasingTheLockIsNotHiddenByAnotherFailure(): void
+    {
+        $cancellation = new CanceledException('Canceled.');
+        $lock = m::mock(RefreshableLock::class);
+        $lock->shouldReceive('block')->once()->andReturn(true);
+        $lock->shouldReceive('release')->once()->andThrow($cancellation);
+        $connection = $this->connection(new FakeTransport, ['lock' => fn () => $lock]);
+
+        try {
+            $connection->exclusive(fn () => throw new LogicException('The callback failed.'));
+            $this->fail('The cancellation was hidden.');
+        } catch (CanceledException $caught) {
+            $this->assertSame($cancellation, $caught);
+        }
     }
 
     public function testProcessesSharingASequenceStoreRejectEachOthersLateReplies(): void

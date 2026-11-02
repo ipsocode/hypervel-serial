@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Ipsocode\Serial\Sequences;
 
-use Hypervel\Contracts\Cache\Repository;
+use Hypervel\Cache\Repository;
 use Ipsocode\Serial\Request;
 
 /**
@@ -34,7 +34,7 @@ class SharedCounter extends Counter
      */
     public function next(Request $request): int
     {
-        $this->current = $this->store->get($this->key, $this->start);
+        $this->current = $this->store->integer($this->key, $this->start);
 
         $number = parent::next($request);
 

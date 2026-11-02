@@ -30,6 +30,13 @@ class FakeDio
      */
     public static array $settings = [];
 
+    /**
+     * The settings each dio_tcsetattr() call passed, in order.
+     *
+     * @var array<int, array<string, int>>
+     */
+    public static array $settingsHistory = [];
+
     public static string $incoming = '';
 
     public static string $written = '';
@@ -52,7 +59,7 @@ class FakeDio
     {
         static::$openFails = false;
         static::$device = static::$flags = null;
-        static::$settings = static::$writeResults = [];
+        static::$settings = static::$writeResults = static::$settingsHistory = [];
         static::$incoming = static::$written = '';
         static::$closed = static::$unplugged = false;
     }
@@ -83,6 +90,7 @@ class FakeDio
         }
 
         static::$settings = $settings;
+        static::$settingsHistory[] = $settings;
 
         return true;
     }

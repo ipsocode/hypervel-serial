@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Ipsocode\Serial;
 
 use Ipsocode\Serial\Contracts\Result;
+use Ipsocode\Serial\Exceptions\LockLostException;
 use Ipsocode\Serial\Exceptions\SerialException;
 
 readonly class RetryPolicy
@@ -26,7 +27,8 @@ readonly class RetryPolicy
      */
     public function shouldRetry(int $attempt, Result|SerialException $outcome): bool
     {
-        if ($attempt > $this->times) {
+        // A lock that was lost stays lost, so another attempt would fail the same way.
+        if ($attempt > $this->times || $outcome instanceof LockLostException) {
             return false;
         }
 

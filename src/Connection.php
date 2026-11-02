@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Ipsocode\Serial;
 
 use Closure;
-use Hypervel\Contracts\Cache\Lock;
 use Hypervel\Contracts\Cache\LockTimeoutException;
+use Hypervel\Contracts\Cache\RefreshableLock;
 use Hypervel\Contracts\Events\Dispatcher;
 use Hypervel\Coroutine\Coroutine;
 use Hypervel\Engine\Channel;
@@ -20,12 +20,14 @@ use Ipsocode\Serial\Events\FrameReceived;
 use Ipsocode\Serial\Events\FrameSent;
 use Ipsocode\Serial\Events\TransactionFailed;
 use Ipsocode\Serial\Exceptions\FrameException;
+use Ipsocode\Serial\Exceptions\LockLostException;
 use Ipsocode\Serial\Exceptions\ReservedException;
 use Ipsocode\Serial\Exceptions\SerialException;
 use Ipsocode\Serial\Exceptions\TimeoutException;
 use Ipsocode\Serial\Exceptions\TransportException;
 use Psr\Log\LoggerInterface;
 use Swoole\Coroutine\CanceledException;
+use Throwable;
 
 /**
  * One device, shared by every coroutine in the worker. A transaction holds the device from
@@ -63,12 +65,23 @@ class Connection
     protected ?CarbonImmutable $reservedUntil = null;
 
     /**
+     * The cross-process lock the current hold of the device has taken, if any.
+     */
+    protected ?RefreshableLock $heldLock = null;
+
+    /**
+     * When the held lock was acquired or last refreshed.
+     */
+    protected ?CarbonImmutable $lockRefreshedAt = null;
+
+    /**
      * Create a new connection.
      *
      * @param float $timeout the seconds to wait for a reply
      * @param float $pollInterval the seconds to wait between reads while a reply arrives
-     * @param null|Closure(): Lock $lock the cross-process lock each hold of the device takes
+     * @param null|Closure(): RefreshableLock $lock the cross-process lock each hold of the device takes
      * @param int $lockWait the seconds to wait for the cross-process lock
+     * @param int $lockSeconds the seconds the cross-process lock lasts, unless it is refreshed
      */
     public function __construct(
         protected string $name,
@@ -82,6 +95,7 @@ class Connection
         protected ?LoggerInterface $logger = null,
         protected ?Closure $lock = null,
         protected int $lockWait = 0,
+        protected int $lockSeconds = 0,
     ) {
         $this->mutex = new Channel(1);
     }
@@ -201,13 +215,17 @@ class Connection
      */
     protected function attempt(Request $request, ?float $timeout, ?int $retries): Result
     {
-        $request = $request->withSequence($this->sequence->next($request));
+        $numbered = null;
         $timeout ??= $this->timeout;
         $retryPolicy = $retries === null ? $this->retryPolicy : $this->retryPolicy->withTimes($retries);
 
         for ($attempt = 1;; ++$attempt) {
             try {
-                $outcome = $this->exchange($request, $timeout);
+                $this->keepLock();
+
+                $numbered ??= $request->withSequence($this->sequence->next($request));
+
+                $outcome = $this->exchange($numbered, $timeout);
             } catch (SerialException $exception) {
                 $outcome = $exception;
             }
@@ -216,13 +234,13 @@ class Connection
                 break;
             }
 
-            $this->logger?->warning('Serial transaction attempt failed; trying again.', $this->context($request, $attempt, $outcome));
+            $this->logger?->warning('Serial transaction attempt failed; trying again.', $this->context($numbered ?? $request, $attempt, $outcome));
 
             Sleep::sleep($retryPolicy->delay);
         }
 
         if ($outcome instanceof SerialException || ! $outcome->success()) {
-            $this->failed($request, $attempt, $outcome);
+            $this->failed($numbered ?? $request, $attempt, $outcome);
         }
 
         if ($outcome instanceof SerialException) {
@@ -265,6 +283,7 @@ class Connection
      *
      * @throws CanceledException when the coroutine is canceled while waiting for the device
      * @throws LockTimeoutException when another process holds the cross-process lock for too long
+     * @throws LockLostException when a transaction finds the cross-process lock taken by another process
      */
     public function exclusive(Closure $callback): mixed
     {
@@ -281,14 +300,87 @@ class Connection
         $this->holder = $coroutine;
 
         try {
-            return $this->lock === null
-                ? $callback($this)
-                : ($this->lock)()->block($this->lockWait, fn () => $callback($this));
+            return $this->lock === null ? $callback($this) : $this->holdLock($this->lock, $callback);
         } finally {
             $this->holder = null;
 
             $this->mutex->pop();
         }
+    }
+
+    /**
+     * Run the callback while holding the cross-process lock.
+     *
+     * @template TReturn
+     *
+     * @param Closure(): RefreshableLock $createLock
+     * @param Closure(static): TReturn $callback
+     * @return TReturn
+     *
+     * @throws LockTimeoutException when another process holds the lock for too long
+     */
+    protected function holdLock(Closure $createLock, Closure $callback): mixed
+    {
+        $lock = $createLock();
+
+        $lock->block($this->lockWait);
+
+        $this->heldLock = $lock;
+        $this->lockRefreshedAt = CarbonImmutable::now();
+
+        try {
+            $result = $callback($this);
+        } catch (Throwable $failure) {
+            $this->releaseLock($lock, $failure);
+
+            throw $failure;
+        }
+
+        $this->releaseLock($lock);
+
+        return $result;
+    }
+
+    /**
+     * Release the cross-process lock a hold has taken.
+     *
+     * A failure of the release does not replace the failure of the callback.
+     */
+    protected function releaseLock(RefreshableLock $lock, ?Throwable $failure = null): void
+    {
+        $this->heldLock = $this->lockRefreshedAt = null;
+
+        try {
+            $released = $lock->release();
+        } catch (Throwable $exception) {
+            if ($failure === null || ($exception instanceof CanceledException && ! $failure instanceof CanceledException)) {
+                throw $exception;
+            }
+
+            return;
+        }
+
+        if (! $released) {
+            $this->logger?->error('The cross-process lock had expired or been taken before the hold ended.', ['connection' => $this->name]);
+        }
+    }
+
+    /**
+     * Extend the held cross-process lock when half of its time has passed, before the device is used again.
+     *
+     * @throws LockLostException when the lock expired or another process took it
+     */
+    protected function keepLock(): void
+    {
+        if ($this->heldLock === null || $this->lockRefreshedAt?->addMicroseconds($this->lockSeconds * 500_000)->greaterThan(CarbonImmutable::now())) {
+            return;
+        }
+
+        if (! $this->heldLock->refresh()) {
+            throw new LockLostException("The cross-process lock of the [{$this->name}] serial connection expired or was taken by another process, so the device was not used.");
+        }
+
+        $this->lockRefreshedAt = CarbonImmutable::now();
     }
 
     /**

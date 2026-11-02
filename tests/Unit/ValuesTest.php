@@ -16,6 +16,7 @@ use Ipsocode\Serial\RetryPolicy;
 use Ipsocode\Serial\Sequences\Counter;
 use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Tests\Fixtures\StatusResult;
+use Ipsocode\Serial\Tests\Fixtures\StringifyingStore;
 use Ipsocode\Serial\Tests\Fixtures\TestCommand;
 
 class ValuesTest extends UnitTestCase
@@ -100,6 +101,14 @@ class ValuesTest extends UnitTestCase
         $second->reset();
 
         $this->assertSame(1, $first->next($request));
+    }
+
+    public function testSharedCounterReadsTheNumberOfAStoreThatReturnsNumericStrings(): void
+    {
+        $counter = new SharedCounter(new Repository(new StringifyingStore), 'sequence', start: 1, max: 3);
+        $request = new Request(1);
+
+        $this->assertSame([1, 2, 3, 1], array_map(fn (): int => $counter->next($request), range(1, 4)));
     }
 
     public function testCounterDefaultsToSixteenBits(): void

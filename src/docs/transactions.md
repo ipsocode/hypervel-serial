@@ -43,6 +43,7 @@ A transaction returns the result the protocol made of the device's reply, whethe
 | `ChecksumException` | The frame did not match its checksum |
 | `TransportException` | The device could not be opened, read or written; the next attempt opens it again, so a device that is unplugged and plugged back in recovers |
 | `ReservedException` | The device is [reserved](#reservations) for another owner; this one is thrown at once, without an attempt |
+| `LockLostException` | The connection's [lock across processes](configuration.md#a-lock-across-processes) expired or another process took it; thrown before anything is written, and not tried again |
 
 <a name="timeouts-and-retries"></a>
 ### Timeouts and retries
@@ -72,7 +73,7 @@ Serial::connection()->exclusive(function () use ($blocks) {
 });
 ```
 
-Transactions the callback runs go straight through, and any other coroutine's wait until the callback returns. A coroutine the callback starts does not share the hold, so send from the callback itself. When the connection has a [lock across processes](configuration.md#a-lock-across-processes), each hold takes it too.
+Transactions the callback runs go straight through, and any other coroutine's wait until the callback returns. A coroutine the callback starts does not share the hold, so send from the callback itself. When the connection has a [lock across processes](configuration.md#a-lock-across-processes), each hold takes it too, and keeps it for as long as the hold lasts, as [configuring a lock](configuration.md#a-lock-across-processes) explains.
 
 <a name="reservations"></a>
 ## Reservations
@@ -119,6 +120,6 @@ A connection only builds an event when something listens for it. The connection'
 <a name="running-on-hypervel"></a>
 ## Running on Hypervel
 
-A connection belongs to the worker or process that resolved it, and every coroutine in it shares the connection, as they share the device. Waiting for a reply yields to the other coroutines, so a transaction never blocks the worker.
+A connection belongs to the worker or process that resolved it, and every coroutine in it shares the connection, as they share the device. Waiting for a reply yields to the other coroutines, so a transaction does not block the worker while it waits. The [dio transport](configuration.md#the-dio-transport) is the exception when it opens or closes a device that is hung: those calls cannot yield, and stall every coroutine on the worker until they return.
 
 A device can be opened by one process at a time without confusion, so give the device to one process, such as a Hypervel server process, and have the other workers ask that process to send. If more than one process must open the device, set the connection's [lock](configuration.md#a-lock-across-processes).

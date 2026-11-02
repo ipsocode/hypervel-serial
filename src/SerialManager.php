@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Ipsocode\Serial;
 
 use Closure;
-use Hypervel\Contracts\Cache\Lock;
+use Hypervel\Cache\Repository;
 use Hypervel\Contracts\Cache\LockProvider;
-use Hypervel\Contracts\Cache\Repository;
+use Hypervel\Contracts\Cache\RefreshableLock;
 use Hypervel\Support\MultipleInstanceManager;
 use InvalidArgumentException;
 use Ipsocode\Serial\Contracts\Protocol;
@@ -136,6 +136,7 @@ class SerialManager extends MultipleInstanceManager
             logger: isset($config['log']) ? $this->app->make('log')->channel($config['log']) : null,
             lock: $store === null ? null : $this->createLock($name, $this->lockProvider($name, $store), $lock['seconds']),
             lockWait: $lock === null ? 0 : $lock['wait'],
+            lockSeconds: $lock === null ? 0 : $lock['seconds'],
         );
     }
 
@@ -177,13 +178,27 @@ class SerialManager extends MultipleInstanceManager
     /**
      * Create the factory of the cross-process lock a connection's hold of its device takes.
      *
-     * @return Closure(): Lock
+     * @return Closure(): RefreshableLock
+     *
+     * @throws InvalidArgumentException when the cache store's locks cannot be refreshed
      */
     protected function createLock(string $name, LockProvider $provider, int $seconds): Closure
     {
+        $key = "serial:{$name}";
+
+        // A hold that outlasts the lock is kept alive by refreshing it, which not every driver can do.
+        if (! $provider->lock($key, $seconds) instanceof RefreshableLock) {
+            throw new InvalidArgumentException("The cache store of the [{$name}] serial connection's lock cannot refresh its locks.");
+        }
+
         // A new lock for each hold gives each hold its own owner, even in workers forked from
         // a process that resolved the connection.
-        return fn (): Lock => $provider->lock("serial:{$name}", $seconds);
+        return function () use ($provider, $key, $seconds): RefreshableLock {
+            /** @var RefreshableLock $lock */
+            $lock = $provider->lock($key, $seconds);
+
+            return $lock;
+        };
     }
 
     /**

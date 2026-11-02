@@ -64,31 +64,29 @@ class DioTransport implements Transport
             throw new TransportException("Unable to open the serial device [{$this->device}].");
         }
 
-        // dio turns hardware flow control on unless told otherwise, so it is always passed, and
-        // reads every setting as an integer, so none may be a bool.
-        dio_tcsetattr($handle, [
-            'baud' => $this->baud,
-            'bits' => $this->dataBits,
-            'stop' => $this->stopBits,
-            'parity' => match ($this->parity) {
-                Parity::None => 0,
-                Parity::Odd => 1,
-                Parity::Even => 2,
-            },
-            'flow_control' => (int) $this->flowControl,
-            'is_canonical' => 0,
-        ]);
+        $this->applySettings($handle, $this->flowControl);
 
         $this->handle = $handle;
     }
 
     /**
      * Close the device.
+     *
+     * With hardware flow control on, a device that holds CTS low keeps queued output from
+     * leaving, and close(2) then waits for it, up to the port's closing wait, with the whole
+     * worker stalled. Turning flow control off first, which the kernel applies at once, lets that
+     * output leave at line speed, so the close ends as soon as it has been sent.
      */
     public function close(): void
     {
-        if ($this->handle !== null) {
-            dio_close($this->handle);
+        $handle = $this->handle;
+
+        if ($handle !== null) {
+            if ($this->flowControl) {
+                $this->applySettings($handle, false);
+            }
+
+            dio_close($handle);
 
             $this->handle = null;
         }
@@ -197,6 +195,30 @@ class DioTransport implements Transport
         }
 
         throw new TransportException("Unable to write to the serial device [{$this->device}]: {$warning}");
+    }
+
+    /**
+     * Apply the line settings to the given device.
+     *
+     * @param resource $handle
+     */
+    protected function applySettings(mixed $handle, bool $flowControl): void
+    {
+        // dio turns hardware flow control on unless told otherwise, so it is always passed, and
+        // reads every setting as an integer, so none may be a bool. It also rebuilds every
+        // setting from the array, so each is passed each time.
+        dio_tcsetattr($handle, [
+            'baud' => $this->baud,
+            'bits' => $this->dataBits,
+            'stop' => $this->stopBits,
+            'parity' => match ($this->parity) {
+                Parity::None => 0,
+                Parity::Odd => 1,
+                Parity::Even => 2,
+            },
+            'flow_control' => (int) $flowControl,
+            'is_canonical' => 0,
+        ]);
     }
 
     /**
