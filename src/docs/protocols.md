@@ -130,3 +130,5 @@ The package also has `Ipsocode\Serial\Checksums\Lrc`, the longitudinal redundanc
 ## Writing a protocol
 
 A device whose frames do not fit `FramedProtocol`'s layout gets a protocol of its own that implements `Ipsocode\Serial\Contracts\Protocol`. Its `decode` receives an `Ipsocode\Serial\Buffer` holding every byte read so far: look into it with `indexOf` and `peek`, take a frame off its front with `consume` once one is complete, and return `null` until then.
+
+The container shares one instance of a protocol class across every connection in a worker, because an unbound class is resolved once and kept. Two connections that need different framing, such as other start bytes or another checksum, therefore each name a subclass of their own, or a class the container binds with its own arguments. A protocol also keeps no state between calls: whatever it remembers is shared by every connection and every coroutine that uses it.
