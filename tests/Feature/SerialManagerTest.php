@@ -54,6 +54,46 @@ class SerialManagerTest extends TestCase
         ]);
     }
 
+    public function testAConnectionMissingASettingFailsNamingItsConfigKey(): void
+    {
+        $this->app->get('config')->set('serial.connections.scale', [
+            'transport' => 'memory',
+            'protocol' => HeaderProtocol::class,
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('serial.connections.scale.retries');
+
+        Serial::connection('scale');
+    }
+
+    public function testAConnectionWithAMistypedSettingFailsNamingItsConfigKey(): void
+    {
+        $this->app->get('config')->set('serial.connections.loopback.timeout', '2');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('serial.connections.loopback.timeout');
+
+        Serial::connection('loopback');
+    }
+
+    public function testAStreamConnectionMissingItsDeviceFailsNamingItsConfigKey(): void
+    {
+        $this->app->get('config')->set('serial.connections.tty', [
+            'transport' => 'stream',
+            'protocol' => HeaderProtocol::class,
+            'timeout' => 1.0,
+            'retries' => 0,
+            'retry_delay' => 0.1,
+            'poll_interval' => 0.01,
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('serial.connections.tty.device');
+
+        Serial::connection('tty');
+    }
+
     public function testTheProviderRegistersTheManagerAndMergesTheDefaultConfig(): void
     {
         $this->assertInstanceOf(SerialManager::class, $this->app->make('serial'));

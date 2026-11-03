@@ -123,7 +123,7 @@ class SerialFake extends SerialManager implements Fake
     {
         $config = $this->getInstanceConfig($name);
 
-        $protocol = new SimulatedProtocol($this->app->make($config['protocol']), function (Request $request) use ($name): Result {
+        $protocol = new SimulatedProtocol($this->app->make($this->config->string($this->key($name, 'protocol'))), function (Request $request) use ($name): Result {
             $this->sent[] = ['connection' => $name, 'request' => $request];
 
             return ($this->responder)($request, $name);

@@ -58,7 +58,7 @@ class SerialManager extends MultipleInstanceManager
     }
 
     /**
-     * Get the configuration of the given connection.
+     * Get the configuration of the given connection, with its name under the "name" key.
      *
      * @return array<string, mixed>
      *
@@ -66,8 +66,10 @@ class SerialManager extends MultipleInstanceManager
      */
     public function getInstanceConfig(string $name): array
     {
-        return $this->config->get("serial.connections.{$name}")
+        $config = $this->config->get("serial.connections.{$name}")
             ?? throw new InvalidArgumentException("Serial connection [{$name}] is not configured.");
+
+        return [...$config, 'name' => $name];
     }
 
     /**
@@ -103,7 +105,7 @@ class SerialManager extends MultipleInstanceManager
     protected function resolve(string $name): Connection
     {
         $config = $this->getInstanceConfig($name);
-        $protocol = $this->app->make($config['protocol']);
+        $protocol = $this->app->make($this->config->string($this->key($name, 'protocol')));
 
         if (isset($config['simulator'])) {
             $simulator = $this->app->makeTransient($config['simulator']);
@@ -129,15 +131,23 @@ class SerialManager extends MultipleInstanceManager
             transport: $transport,
             protocol: $protocol,
             sequence: $this->createSequence($name, $config, $store),
-            retryPolicy: new RetryPolicy($config['retries'], $config['retry_delay']),
-            timeout: $config['timeout'],
-            pollInterval: $config['poll_interval'],
+            retryPolicy: new RetryPolicy($this->config->integer($this->key($name, 'retries')), $this->config->float($this->key($name, 'retry_delay'))),
+            timeout: $this->config->float($this->key($name, 'timeout')),
+            pollInterval: $this->config->float($this->key($name, 'poll_interval')),
             events: $this->app->make('events'),
             logger: isset($config['log']) ? $this->app->make('log')->channel($config['log']) : null,
             lock: $store === null ? null : $this->createLock($name, $this->lockProvider($name, $store), $lock['seconds']),
             lockWait: $lock === null ? 0 : $lock['wait'],
             lockSeconds: $lock === null ? 0 : $lock['seconds'],
         );
+    }
+
+    /**
+     * Get the config key of a setting of the given connection.
+     */
+    protected function key(string $name, string $setting): string
+    {
+        return "serial.connections.{$name}.{$setting}";
     }
 
     /**
@@ -208,7 +218,13 @@ class SerialManager extends MultipleInstanceManager
      */
     protected function createStreamTransport(array $config): StreamTransport
     {
-        return new StreamTransport($config['device'], $config['timeout'], $config['poll_interval']);
+        $name = $config['name'];
+
+        return new StreamTransport(
+            $this->config->string($this->key($name, 'device')),
+            $this->config->float($this->key($name, 'timeout')),
+            $this->config->float($this->key($name, 'poll_interval')),
+        );
     }
 
     /**
@@ -218,15 +234,17 @@ class SerialManager extends MultipleInstanceManager
      */
     protected function createDioTransport(array $config): DioTransport
     {
+        $name = $config['name'];
+
         return new DioTransport(
-            device: $config['device'],
-            baud: $config['baud'],
-            dataBits: $config['data_bits'],
-            stopBits: $config['stop_bits'],
-            parity: Parity::from($config['parity']),
-            flowControl: $config['flow_control'],
-            timeout: $config['timeout'],
-            pollInterval: $config['poll_interval'],
+            device: $this->config->string($this->key($name, 'device')),
+            baud: $this->config->integer($this->key($name, 'baud')),
+            dataBits: $this->config->integer($this->key($name, 'data_bits')),
+            stopBits: $this->config->integer($this->key($name, 'stop_bits')),
+            parity: Parity::from($this->config->string($this->key($name, 'parity'))),
+            flowControl: $this->config->boolean($this->key($name, 'flow_control')),
+            timeout: $this->config->float($this->key($name, 'timeout')),
+            pollInterval: $this->config->float($this->key($name, 'poll_interval')),
         );
     }
 
