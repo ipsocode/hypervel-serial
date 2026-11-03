@@ -101,6 +101,18 @@ class ConnectionTest extends TestCase
         Sleep::assertSlept(fn ($duration): bool => $duration->totalMilliseconds === 100.0, 1);
     }
 
+    public function testTransactReturnsTheValidReplyBehindACorruptFrame(): void
+    {
+        $transport = new FakeTransport([
+            fn (string $written): string => substr_replace($this->reply(0), 'F', -3, 1) . $this->reply($this->sequenceOf($written), 'own'),
+        ]);
+
+        $result = $this->connection($transport)->transact(new Request(6), retries: 0);
+
+        $this->assertSame('own', $result->data());
+        $this->assertCount(1, $transport->written());
+    }
+
     public function testTransactTriesAgainAfterAReplyToAnotherRequest(): void
     {
         Sleep::fake();
