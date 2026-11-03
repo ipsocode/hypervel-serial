@@ -18,6 +18,7 @@ use Ipsocode\Serial\Tests\Fixtures\HeaderProtocol;
 use Ipsocode\Serial\Tests\Fixtures\LengthlessProtocol;
 use Ipsocode\Serial\Tests\Fixtures\LengthProtocol;
 use LogicException;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class FramedProtocolTest extends UnitTestCase
 {
@@ -97,6 +98,30 @@ class FramedProtocolTest extends UnitTestCase
         $buffer->append(substr($frame, 1));
 
         $this->assertSame('hi', $protocol->decode($buffer)->payload);
+    }
+
+    #[DataProvider('splitsOfALongStart')]
+    public function testDecodeKeepsALongStartSplitAcrossReadsAtAnyBoundary(int $split): void
+    {
+        $protocol = new FramedProtocol(start: "\xAA\xBB\xCC\xDD\xEE", end: "\x03");
+        $frame = $protocol->encode(new Request(1, 'hi'));
+        $buffer = new Buffer(substr($frame, 0, $split));
+
+        $this->assertNull($protocol->decode($buffer));
+
+        $buffer->append(substr($frame, $split));
+
+        $this->assertSame('hi', $protocol->decode($buffer)->payload);
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function splitsOfALongStart(): iterable
+    {
+        foreach ([1, 2, 3, 4, 5, 6] as $split) {
+            yield "after {$split} bytes" => [$split];
+        }
     }
 
     public function testDecodeOfAnEmptyBufferWithoutStartBytesWaits(): void

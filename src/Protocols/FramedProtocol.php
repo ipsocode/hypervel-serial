@@ -177,7 +177,7 @@ class FramedProtocol implements Protocol
 
         if ($position === null) {
             // Keep what may be the beginning of start bytes split across two reads.
-            $buffer->consume($buffer->length() - strlen($this->start) + 1);
+            $buffer->consume(max(0, $buffer->length() - strlen($this->start) + 1));
 
             return false;
         }
