@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Ipsocode\Serial;
 
 use Closure;
+use Hypervel\Cache\CacheManager;
 use Hypervel\Cache\Repository;
 use Hypervel\Contracts\Cache\LockProvider;
 use Hypervel\Contracts\Cache\RefreshableLock;
+use Hypervel\Contracts\Events\Dispatcher;
+use Hypervel\Log\LogManager;
 use Hypervel\Support\MultipleInstanceManager;
 use InvalidArgumentException;
 use Ipsocode\Serial\Contracts\Protocol;
@@ -16,6 +19,7 @@ use Ipsocode\Serial\Contracts\Transport;
 use Ipsocode\Serial\Sequences\Counter;
 use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Testing\SimulatedProtocol;
+use Ipsocode\Serial\Testing\Simulator;
 use Ipsocode\Serial\Transports\DioTransport;
 use Ipsocode\Serial\Transports\MemoryTransport;
 use Ipsocode\Serial\Transports\StreamTransport;
@@ -35,7 +39,10 @@ class SerialManager extends MultipleInstanceManager
      */
     public function connection(?string $name = null): Connection
     {
-        return $this->instance($name);
+        /** @var Connection $connection */
+        $connection = $this->instance($name);
+
+        return $connection;
     }
 
     /**
@@ -66,8 +73,10 @@ class SerialManager extends MultipleInstanceManager
      */
     public function getInstanceConfig(string $name): array
     {
-        $config = $this->config->get("serial.connections.{$name}")
-            ?? throw new InvalidArgumentException("Serial connection [{$name}] is not configured.");
+        /** @var null|array<string, mixed> $config */
+        $config = $this->config->get("serial.connections.{$name}");
+
+        $config ??= throw new InvalidArgumentException("Serial connection [{$name}] is not configured.");
 
         return [...$config, 'name' => $name];
     }
@@ -105,15 +114,30 @@ class SerialManager extends MultipleInstanceManager
     protected function resolve(string $name): Connection
     {
         $config = $this->getInstanceConfig($name);
-        $protocol = $this->app->make($this->config->string($this->key($name, 'protocol')));
+        $protocol = $this->protocol($name);
 
         if (isset($config['simulator'])) {
-            $simulator = $this->app->makeTransient($config['simulator']);
+            /** @var Simulator $simulator */
+            $simulator = $this->app->makeTransient($this->config->string($this->key($name, 'simulator')));
 
             return $this->createConnection($name, $config, new MemoryTransport, new SimulatedProtocol($protocol, $simulator->respond(...)));
         }
 
-        return $this->createConnection($name, $config, parent::resolve($name), $protocol);
+        /** @var Transport $transport */
+        $transport = parent::resolve($name);
+
+        return $this->createConnection($name, $config, $transport, $protocol);
+    }
+
+    /**
+     * Resolve the protocol of the given connection.
+     */
+    protected function protocol(string $name): Protocol
+    {
+        /** @var Protocol $protocol */
+        $protocol = $this->app->make($this->config->string($this->key($name, 'protocol')));
+
+        return $protocol;
     }
 
     /**
@@ -123,8 +147,21 @@ class SerialManager extends MultipleInstanceManager
      */
     protected function createConnection(string $name, array $config, Transport $transport, Protocol $protocol): Connection
     {
+        /** @var null|array{store?: null|string, seconds: int, wait: int} $lock */
         $lock = $config['lock'] ?? null;
-        $store = $lock === null ? null : $this->app->make('cache')->store($lock['store'] ?? null);
+        $store = null;
+        $factory = null;
+
+        if ($lock !== null) {
+            /** @var CacheManager $cache */
+            $cache = $this->app->make('cache');
+            /** @var Repository $store */
+            $store = $cache->store($lock['store'] ?? null);
+            $factory = $this->createLock($name, $this->lockProvider($name, $store), $lock['seconds']);
+        }
+
+        /** @var Dispatcher $events */
+        $events = $this->app->make('events');
 
         return new Connection(
             name: $name,
@@ -134,9 +171,9 @@ class SerialManager extends MultipleInstanceManager
             retryPolicy: new RetryPolicy($this->config->integer($this->key($name, 'retries')), $this->config->float($this->key($name, 'retry_delay'))),
             timeout: $this->config->float($this->key($name, 'timeout')),
             pollInterval: $this->config->float($this->key($name, 'poll_interval')),
-            events: $this->app->make('events'),
-            logger: isset($config['log']) ? $this->app->make('log')->channel($config['log']) : null,
-            lock: $store === null ? null : $this->createLock($name, $this->lockProvider($name, $store), $lock['seconds']),
+            events: $events,
+            logger: isset($config['log']) ? $this->app->make(LogManager::class)->channel($this->config->string($this->key($name, 'log'))) : null,
+            lock: $factory,
             lockWait: $lock === null ? 0 : $lock['wait'],
             lockSeconds: $lock === null ? 0 : $lock['seconds'],
         );
@@ -160,6 +197,7 @@ class SerialManager extends MultipleInstanceManager
      */
     protected function createSequence(string $name, array $config, ?Repository $store): Sequence
     {
+        /** @var class-string<Sequence> $class */
         $class = $config['sequence'] ?? Counter::class;
 
         if ($store !== null && $class === Counter::class) {
@@ -218,6 +256,7 @@ class SerialManager extends MultipleInstanceManager
      */
     protected function createStreamTransport(array $config): StreamTransport
     {
+        /** @var string $name */
         $name = $config['name'];
 
         return new StreamTransport(
@@ -234,6 +273,7 @@ class SerialManager extends MultipleInstanceManager
      */
     protected function createDioTransport(array $config): DioTransport
     {
+        /** @var string $name */
         $name = $config['name'];
 
         return new DioTransport(
