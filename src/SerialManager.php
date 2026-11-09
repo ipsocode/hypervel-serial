@@ -168,9 +168,9 @@ class SerialManager extends MultipleInstanceManager
             transport: $transport,
             protocol: $protocol,
             sequence: $this->createSequence($name, $config, $store),
-            retryPolicy: new RetryPolicy($this->config->integer($this->key($name, 'retries')), $this->config->float($this->key($name, 'retry_delay'))),
-            timeout: $this->config->float($this->key($name, 'timeout')),
-            pollInterval: $this->config->float($this->key($name, 'poll_interval')),
+            retryPolicy: new RetryPolicy($this->config->integer($this->key($name, 'retries')), $this->seconds($name, 'retry_delay')),
+            timeout: $this->seconds($name, 'timeout'),
+            pollInterval: $this->seconds($name, 'poll_interval'),
             events: $events,
             logger: isset($config['log']) ? $this->app->make(LogManager::class)->channel($this->config->string($this->key($name, 'log'))) : null,
             lock: $factory,
@@ -185,6 +185,23 @@ class SerialManager extends MultipleInstanceManager
     protected function key(string $name, string $setting): string
     {
         return "serial.connections.{$name}.{$setting}";
+    }
+
+    /**
+     * Get a setting in seconds, which may be an integer or a float.
+     *
+     * @throws InvalidArgumentException when the setting is neither
+     */
+    protected function seconds(string $name, string $setting): float
+    {
+        $key = $this->key($name, $setting);
+        $value = $this->config->get($key);
+
+        if (! is_int($value) && ! is_float($value)) {
+            throw new InvalidArgumentException(sprintf('Configuration value for key [%s] must be a float, %s given.', $key, gettype($value)));
+        }
+
+        return (float) $value;
     }
 
     /**
@@ -261,8 +278,8 @@ class SerialManager extends MultipleInstanceManager
 
         return new StreamTransport(
             $this->config->string($this->key($name, 'device')),
-            $this->config->float($this->key($name, 'timeout')),
-            $this->config->float($this->key($name, 'poll_interval')),
+            $this->seconds($name, 'timeout'),
+            $this->seconds($name, 'poll_interval'),
         );
     }
 
@@ -283,8 +300,8 @@ class SerialManager extends MultipleInstanceManager
             stopBits: $this->config->integer($this->key($name, 'stop_bits')),
             parity: Parity::from($this->config->string($this->key($name, 'parity'))),
             flowControl: $this->config->boolean($this->key($name, 'flow_control')),
-            timeout: $this->config->float($this->key($name, 'timeout')),
-            pollInterval: $this->config->float($this->key($name, 'poll_interval')),
+            timeout: $this->seconds($name, 'timeout'),
+            pollInterval: $this->seconds($name, 'poll_interval'),
         );
     }
 

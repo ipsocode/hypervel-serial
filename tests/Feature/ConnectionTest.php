@@ -14,6 +14,7 @@ use Ipsocode\Serial\Connection;
 use Ipsocode\Serial\Events\FrameReceived;
 use Ipsocode\Serial\Events\FrameSent;
 use Ipsocode\Serial\Events\TransactionFailed;
+use Ipsocode\Serial\Exceptions\FrameException;
 use Ipsocode\Serial\Exceptions\LockLostException;
 use Ipsocode\Serial\Exceptions\ReservedException;
 use Ipsocode\Serial\Exceptions\TimeoutException;
@@ -24,6 +25,7 @@ use Ipsocode\Serial\Sequences\Counter;
 use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Testing\FakeTransport;
 use Ipsocode\Serial\Tests\Fixtures\HeaderProtocol;
+use Ipsocode\Serial\Tests\Fixtures\HexLengthProtocol;
 use Ipsocode\Serial\Tests\Fixtures\StatusResult;
 use Ipsocode\Serial\Tests\TestCase;
 use LogicException;
@@ -110,6 +112,21 @@ class ConnectionTest extends TestCase
         $result = $this->connection($transport)->transact(new Request(6), retries: 0);
 
         $this->assertSame('own', $result->data());
+        $this->assertCount(1, $transport->written());
+    }
+
+    public function testTransactFailsWhenAFrameThatCannotBeDecodedIsNotConsumed(): void
+    {
+        $transport = new FakeTransport(["\x02ZZ0001"]);
+        $connection = $this->connection($transport, ['protocol' => new HexLengthProtocol]);
+
+        try {
+            $connection->transact(new Request(6), retries: 0);
+            $this->fail('The transaction should have failed.');
+        } catch (FrameException $exception) {
+            $this->assertStringContainsString('not pairs of hex digits', $exception->getMessage());
+        }
+
         $this->assertCount(1, $transport->written());
     }
 

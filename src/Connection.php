@@ -435,10 +435,17 @@ class Connection
             $corrupt = null;
 
             while (true) {
+                $length = $buffer->length();
+
                 try {
                     $frame = $this->protocol->decode($buffer);
                 } catch (FrameException $exception) {
-                    // The bad frame is already consumed, so a valid reply may still follow it in the buffer.
+                    // A decode that consumed nothing leaves the same bytes to fail again, and nothing can follow them.
+                    if ($buffer->length() >= $length) {
+                        throw $exception;
+                    }
+
+                    // The bad frame is consumed, so a valid reply may still follow it in the buffer.
                     $corrupt = $exception;
 
                     continue;

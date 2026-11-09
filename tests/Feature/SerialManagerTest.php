@@ -77,6 +77,16 @@ class SerialManagerTest extends TestCase
         Serial::connection('loopback');
     }
 
+    public function testAConnectionAcceptsIntegersForItsSecondsSettings(): void
+    {
+        $config = $this->app->get('config');
+        $config->set('serial.connections.loopback.timeout', 2);
+        $config->set('serial.connections.loopback.retry_delay', 1);
+        $config->set('serial.connections.loopback.poll_interval', 0);
+
+        $this->assertInstanceOf(Connection::class, Serial::connection('loopback'));
+    }
+
     public function testAStreamConnectionMissingItsDeviceFailsNamingItsConfigKey(): void
     {
         $this->app->get('config')->set('serial.connections.tty', [
