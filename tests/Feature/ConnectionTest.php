@@ -14,6 +14,7 @@ use Ipsocode\Serial\Connection;
 use Ipsocode\Serial\Events\FrameReceived;
 use Ipsocode\Serial\Events\FrameSent;
 use Ipsocode\Serial\Events\TransactionFailed;
+use Ipsocode\Serial\Exceptions\FrameException;
 use Ipsocode\Serial\Exceptions\LockLostException;
 use Ipsocode\Serial\Exceptions\ReservedException;
 use Ipsocode\Serial\Exceptions\TimeoutException;
@@ -24,6 +25,7 @@ use Ipsocode\Serial\Sequences\Counter;
 use Ipsocode\Serial\Sequences\SharedCounter;
 use Ipsocode\Serial\Testing\FakeTransport;
 use Ipsocode\Serial\Tests\Fixtures\HeaderProtocol;
+use Ipsocode\Serial\Tests\Fixtures\HexLengthProtocol;
 use Ipsocode\Serial\Tests\Fixtures\StatusResult;
 use Ipsocode\Serial\Tests\TestCase;
 use LogicException;
@@ -99,6 +101,33 @@ class ConnectionTest extends TestCase
         $this->assertTrue($this->connection($transport)->transact(new Request(6))->success());
         $this->assertCount(2, $transport->written());
         Sleep::assertSlept(fn ($duration): bool => $duration->totalMilliseconds === 100.0, 1);
+    }
+
+    public function testTransactReturnsTheValidReplyBehindACorruptFrame(): void
+    {
+        $transport = new FakeTransport([
+            fn (string $written): string => substr_replace($this->reply(0), 'F', -3, 1) . $this->reply($this->sequenceOf($written), 'own'),
+        ]);
+
+        $result = $this->connection($transport)->transact(new Request(6), retries: 0);
+
+        $this->assertSame('own', $result->data());
+        $this->assertCount(1, $transport->written());
+    }
+
+    public function testTransactFailsWhenAFrameThatCannotBeDecodedIsNotConsumed(): void
+    {
+        $transport = new FakeTransport(["\x02ZZ0001"]);
+        $connection = $this->connection($transport, ['protocol' => new HexLengthProtocol]);
+
+        try {
+            $connection->transact(new Request(6), retries: 0);
+            $this->fail('The transaction should have failed.');
+        } catch (FrameException $exception) {
+            $this->assertStringContainsString('not pairs of hex digits', $exception->getMessage());
+        }
+
+        $this->assertCount(1, $transport->written());
     }
 
     public function testTransactTriesAgainAfterAReplyToAnotherRequest(): void

@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace Ipsocode\Serial\Transports;
 
-use Hypervel\Support\CarbonImmutable;
-use Hypervel\Support\Sleep;
+use Ipsocode\Serial\Concerns\InteractsWithDevice;
 use Ipsocode\Serial\Contracts\Transport;
 use Ipsocode\Serial\Exceptions\TransportException;
 use Ipsocode\Serial\Parity;
@@ -15,6 +14,8 @@ use Ipsocode\Serial\Parity;
  */
 class DioTransport implements Transport
 {
+    use InteractsWithDevice;
+
     /**
      * The text of the warning dio_write() raises for a device that cannot take more bytes yet.
      */
@@ -136,7 +137,7 @@ class DioTransport implements Transport
     public function write(string $bytes): void
     {
         $handle = $this->handle();
-        $deadline = CarbonImmutable::now()->addMicroseconds((int) ($this->timeout * 1_000_000));
+        $deadline = $this->writeDeadline();
 
         while ($bytes !== '') {
             $warning = '';
@@ -165,22 +166,8 @@ class DioTransport implements Transport
                 return;
             }
 
-            if (CarbonImmutable::now()->greaterThanOrEqualTo($deadline)) {
-                throw new TransportException("The serial device [{$this->device}] did not take the bytes written to it within {$this->timeout} seconds.");
-            }
-
-            Sleep::sleep($this->pollInterval);
+            $this->waitToWrite($deadline);
         }
-    }
-
-    /**
-     * Discard the bytes that have arrived but not been read.
-     *
-     * @throws TransportException
-     */
-    public function flush(): void
-    {
-        while ($this->read() !== '');
     }
 
     /**
@@ -219,17 +206,5 @@ class DioTransport implements Transport
             'flow_control' => (int) $flowControl,
             'is_canonical' => 0,
         ]);
-    }
-
-    /**
-     * Get the open device.
-     *
-     * @return resource
-     *
-     * @throws TransportException
-     */
-    protected function handle(): mixed
-    {
-        return $this->handle ?? throw new TransportException("The serial device [{$this->device}] is not open.");
     }
 }

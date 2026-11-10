@@ -45,6 +45,8 @@ Each connection in `config/serial.php` is one device. `Serial::connection()` ret
 
 Connections you publish are merged with the package's by name, so a connection of your own sits beside `default` rather than replacing it. The `protocol` is a class the container resolves, so it may take dependencies in its constructor.
 
+A connection of your own does not inherit the keys of `default`, so each connection sets every key its transport reads, apart from the [optional settings](#optional-settings). A key that is missing, or holds a value of the wrong type, fails with an exception that names it, such as `serial.connections.scale.retries`. The `timeout`, `retry_delay` and `poll_interval` settings take an integer or a float.
+
 <a name="transports"></a>
 ## Transports
 

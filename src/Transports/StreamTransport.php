@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace Ipsocode\Serial\Transports;
 
-use Hypervel\Support\CarbonImmutable;
-use Hypervel\Support\Sleep;
+use Ipsocode\Serial\Concerns\InteractsWithDevice;
 use Ipsocode\Serial\Contracts\Transport;
 use Ipsocode\Serial\Exceptions\TransportException;
 
@@ -18,6 +17,8 @@ use Ipsocode\Serial\Exceptions\TransportException;
  */
 class StreamTransport implements Transport
 {
+    use InteractsWithDevice;
+
     /**
      * The open device.
      *
@@ -113,7 +114,7 @@ class StreamTransport implements Transport
     public function write(string $bytes): void
     {
         $handle = $this->handle();
-        $deadline = CarbonImmutable::now()->addMicroseconds((int) ($this->timeout * 1_000_000));
+        $deadline = $this->writeDeadline();
 
         while ($bytes !== '') {
             $written = @fwrite($handle, $bytes);
@@ -128,22 +129,8 @@ class StreamTransport implements Transport
                 return;
             }
 
-            if (CarbonImmutable::now()->greaterThanOrEqualTo($deadline)) {
-                throw new TransportException("The serial device [{$this->device}] did not take the bytes written to it within {$this->timeout} seconds.");
-            }
-
-            Sleep::sleep($this->pollInterval);
+            $this->waitToWrite($deadline);
         }
-    }
-
-    /**
-     * Discard the bytes that have arrived but not been read.
-     *
-     * @throws TransportException
-     */
-    public function flush(): void
-    {
-        while ($this->read() !== '');
     }
 
     /**
@@ -157,17 +144,5 @@ class StreamTransport implements Transport
         $write = $except = null;
 
         return stream_select($read, $write, $except, 0) > 0;
-    }
-
-    /**
-     * Get the open device.
-     *
-     * @return resource
-     *
-     * @throws TransportException
-     */
-    protected function handle(): mixed
-    {
-        return $this->handle ?? throw new TransportException("The serial device [{$this->device}] is not open.");
     }
 }

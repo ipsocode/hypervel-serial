@@ -432,7 +432,29 @@ class Connection
         while (true) {
             $buffer->append($this->transport->read());
 
-            while (($frame = $this->protocol->decode($buffer)) !== null) {
+            $corrupt = null;
+
+            while (true) {
+                $length = $buffer->length();
+
+                try {
+                    $frame = $this->protocol->decode($buffer);
+                } catch (FrameException $exception) {
+                    // A decode that consumed nothing leaves the same bytes to fail again, and nothing can follow them.
+                    if ($buffer->length() >= $length) {
+                        throw $exception;
+                    }
+
+                    // The bad frame is consumed, so a valid reply may still follow it in the buffer.
+                    $corrupt = $exception;
+
+                    continue;
+                }
+
+                if ($frame === null) {
+                    break;
+                }
+
                 $this->received($request, $frame);
 
                 try {
@@ -440,6 +462,10 @@ class Connection
                 } catch (FrameException) {
                     // A late reply to an earlier request: keep reading for this request's own.
                 }
+            }
+
+            if ($corrupt !== null) {
+                throw $corrupt;
             }
 
             if (CarbonImmutable::now()->greaterThanOrEqualTo($deadline)) {
